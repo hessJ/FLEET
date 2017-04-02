@@ -80,6 +80,75 @@ gwas = paste(path_to_gwas, sep = "")
 gwas.sig.threshold = -log10(5e-08)
 
 
+
+
+##################### Module A.  Pruning 1000G CEU data for variants in high LD 
+##########################################################################################################################
+##########################################################################################################################
+##########################################################################################################################
+
+
+### Prune 1KG reference 
+
+for( i in 1:length(ref_data)){
+  cat("\Pruning reference data for variants in high LD (short range)",i)
+  prune = paste("plink --bfile ", ref_data[[i]], " --maf .05 --indep 100 5 2 --out ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[i]]), sep = "")
+  system(prune,show.output.on.console = FALSE)
+}
+prune.in = list.files(path = paste(path_to_fleet,"/pruned/",sep=""), pattern = "prune.in", full.names = TRUE)
+path = path[grepl("1kg_phase1_", path)]
+if(length(prune.in) != 22){stop("Unexpected number of LD-pruned reference data files detected! Please check ~/pruned/ directory for errors.")}
+prune.in = lapply(prune.in, function(x) read.table(x, header = F))
+sum(unlist(lapply(prune.in, nrow))) ## total number of SNPs retained after high-LD pruning step
+
+
+
+
+
+##################### Module B.  Clumping GWAS summary statistics file using LD-pruned 1000G data
+##########################################################################################################################
+##########################################################################################################################
+##########################################################################################################################
+
+
+
+## Clump summary statistics for GWAS provided in the list 'gwas'
+for( i in 1:length(gwas)){
+  
+  
+  ## Enable multi-threading for clumping GWAS
+  cl = makeCluster(n_cores)
+  registerDoParallel(cl)
+  
+  
+  print(paste("Clumping GWAS results:", basename(gwas[[i]])))
+  
+  
+  for( j in 1:length(ref_data)){
+    
+    cmd = paste("plink --bfile ", ref_data[[j]]," --exclude ",path_to_fleet,"/dupvars.txt --freq --clump ", gwas[[i]], " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", r2," --clump-kb ",ld_window," --extract ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[j]]),".prune.in --clump-snp-field ",snp_field," --clump-field ",clump_field," --out F:/ref_data/g1000/qc/clumped/CLUMP_",basename(gwas[[i]]),"_",j, sep = "")
+    
+    system(cmd,show.output.on.console = FALSE)
+    
+  }
+  stopCluster(cl)
+  registerDoSEQ()
+  
+  
+}
+
+
+
+
+
+##################### Module C.  Annotating hg19 common variants with functional/regulatory elements
+##########################################################################################################################
+##########################################################################################################################
+##########################################################################################################################
+
+
+
+
 ### Path to functional regulatory annotations
 paths = list.files(path = path_to_fleet, full.names = T, pattern = "DHS|CODING|PROMOTER|SPLICESITE|UTR|FANTOM|INTRON|HISTONE|RBP|TFBS")
 paths = paths[grepl(".Rdata", paths)]
@@ -118,48 +187,18 @@ for( i in 1:length(paths)){
 }
 
 
-### Prune 1KG reference 
-
-for( i in 1:length(ref_data)){
-  cat("\Pruning reference data for variants in high LD (short range)",i)
-  prune = paste("plink --bfile ", ref_data[[i]], " --maf .05 --indep 100 5 2 --out ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[i]]), sep = "")
-  system(prune,show.output.on.console = FALSE)
-}
-prune.in = list.files(path = paste(path_to_fleet,"/pruned/", pattern = "prune.in", full.names = TRUE)
-                      path = path[grepl("1kg_phase1_", path)]
-if(length(prune.in) != 22){stop("Unexpected number of LD-pruned reference data files detected! Please check ~/pruned/ directory for errors.")}
-prune.in = lapply(prune.in, function(x) read.table(x, header = F))
-sum(unlist(lapply(prune.in, nrow))) ## total number of SNPs retained after high-LD pruning step
-
-
-## Clump summary statistics for GWAS provided in the list 'gwas'
-for( i in 1:length(gwas)){
-  
-  
-  ## Enable multi-threading for clumping GWAS
-  cl = makeCluster(n_cores)
-  registerDoParallel(cl)
-  
-  
-  print(paste("Clumping GWAS results:", basename(gwas[[i]])))
-  
-  
-  for( j in 1:length(ref_data)){
-    
-    cmd = paste("plink --bfile ", ref_data[[j]]," --exclude ",path_to_fleet,"/dupvars.txt --freq --clump ", gwas[[i]], " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", r2," --clump-kb ",ld_window," --extract ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[j]]),".prune.in --clump-snp-field ",snp_field," --clump-field ",clump_field," --out F:/ref_data/g1000/qc/clumped/CLUMP_",basename(gwas[[i]]),"_",j, sep = "")
-    
-    system(cmd,show.output.on.console = FALSE)
-    
-  }
-  stopCluster(cl)
-  registerDoSEQ()
-  
-  
-}
+################## 
 
 
 
-### enrichment analysis 
+
+
+
+
+##################### Module D.  Genome-wide enrichment test for functional annotations across LD-clumped loci  
+##########################################################################################################################
+##########################################################################################################################
+##########################################################################################################################
 
 
 for( i in 1:length(gwas)){
@@ -374,7 +413,12 @@ for( i in 1:length(gwas)){
 }
 
 
-#### Plot engine
+
+##################### Module E.  Plotting results and exporting summary statistics to an html file
+##########################################################################################################################
+##########################################################################################################################
+##########################################################################################################################
+
 
 
 
