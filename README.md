@@ -18,5 +18,5 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 5. `Plotting and exporting html report` in Module E
 
 ### Tip for first-time use:
-1. Run `Module A` once to get LD-pruned 1000G data
+1. Run `Module A` once to store LD-pruned 1000G data in `~/PATH_TO_FLEET/pruned/` directory
 2. Skip `Module A` in future runs if satisfied with the LD-pruning parameters
