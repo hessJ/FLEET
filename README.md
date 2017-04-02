@@ -7,4 +7,4 @@ This tool is used for biological interpretation of GWAS signals for polygenic tr
 https://github.com/hessJ/FLEET/wiki
 
 
-For a description of the method, please see the powerpoint slides (fleet_slides.ppt) above.
+A description of the method is provided in the powerpoint slides (fleet_slides.ppt).
