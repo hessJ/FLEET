@@ -1,5 +1,5 @@
 # FLEET
-Functional LD-clump EnrichmEnt Test 
+Functional LD-clump EnrichmEnt Test (active development)
 
 This tool is used for biological interpretation of GWAS signals for polygenic traits. 
 
