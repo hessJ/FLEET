@@ -76,6 +76,8 @@ ref_data
 ### Path to GWAS file
 gwas = paste(path_to_gwas, sep = "")
 
+### threshold for declaring a SNP genome-wide significant based on its -log10(P)
+gwas.sig.threshold = -log10(5e-08)
 
 
 ### Path to functional regulatory annotations
@@ -319,6 +321,10 @@ for( i in 1:length(gwas)){
       
       
       
+      
+      gwas.sig.annot.hits = df$INDEX[df$binary_hits  == 1 & df$LOGP >= gwas.sig.threshold]
+      gwas.sig.annot.hits = paste(gwas.sig.annot.hits, collapse = "|")
+      
       fit = glm(binary_hits  ~ ZSCORE + MAF + LD_FRIENDS, data = df, family="binomial")
       
       coef = summary(fit)$coefficients
@@ -328,6 +334,7 @@ for( i in 1:length(gwas)){
       coef$df = paste(summary(fit)$df, sep ="", collapse= "//")
       coef$resp = gsub("[,]", "//", tracks[[b]])
       coef$rsq = rsq
+      coef$GWS_VAR_HITS = gwas.sig.annot.hits
       coef$freq = freq_annot[[2]]
       
       x = fit
@@ -483,7 +490,7 @@ for (g in 1:length(gwas)){
   sig$BONF= format(sig$bonf, scientific = T, digits = 3)
   sig$FREQ = format(sig$freq*100, digits= 1)
   
-  xtab = xtable(sig[,colnames(sig) %in% c("features", "resp", "OR", "CI_LOW", "CI_UP", "BONF", "FREQ", "PVAL" )])
+  xtab = xtable(sig[,colnames(sig) %in% c("features", "resp","GWS_VAR_HITS", "OR", "CI_LOW", "CI_UP", "BONF", "FREQ", "PVAL" )])
   print.xtable(xtab, type="html", file= paste(path_to_fleet,"/FLEETReport_",trait.names,".html", sep = ""))
   
   
