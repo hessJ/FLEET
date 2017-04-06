@@ -323,7 +323,7 @@ for( i in 1:length(gwas)){
     
     for( b in 1:length(tracks)){
       
-      cat("\r Enrichment analysis in LD intervals", b, "of", length(tracks))
+      cat("\r Enrichment analysis in LD intervals (", names(paths)[[a]],")", b, "of", length(tracks))
       
       
       tmp.merge = merge(tmp[tmp$ID %in% tracks[[b]]], 
