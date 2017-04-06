@@ -282,8 +282,7 @@ for( i in 1:length(gwas)){
   ld.df$P = clumped.df$P
   
   ## Remove MHC from LD intervals 
-  mhc  = ld.df[ld.df$CHR %in% "6" & ld.df$BP >= 25e6 & ld.df$BP <= 34e6, ]
-  ld.df = ld.df[!ld.df$INDEX %in% mhc$INDEX, ]
+  ld.df = ld.df[!ld.df$INDEX %in% rownames(mhc), ]
   ld.df$INDEX = as.factor(ld.df$INDEX)
   
   
