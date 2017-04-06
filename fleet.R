@@ -490,6 +490,76 @@ for (g in 1:length(gwas)){
   groups = ldply(groups)
   colnames(groups) = c("features","annot")
   
+
+
+names(annot.cat) = c("Gene regions", "DHS", "Chromatin modifications",
+                     "TF binding sites", "RBP binding sites",
+                     "Enhancers")
+
+
+
+for (g in 1:length(gwas)){
+  
+  basename = paste("*",basename(gwas[[g]]),"*GLM-REGRESSION.csv", sep = "")
+  results = list.files(path = "C:/Users/HessJo/Dropbox/encode/summary_stats/", pattern = glob2rx(basename), full.names = TRUE)
+  results = lapply(results, function(x) read.csv(x, header = T))
+  results = plyr::ldply(results)
+  results = results[!is.na(results$annot), ]
+  
+  # results = results[results$freq > .01, ]
+  # results = results[results$annot %in% unlist(annot.cat), ]
+  
+  
+  # results = lapply(glm_combine, function(x) x[[1]])
+  # results = ldply(results)
+  #
+  results$P = results$Pr...z..
+  results$enrich = results$z.value
+  
+  results$logP = -log10(results$P)
+  results$bonf = p.adjust(results$P, "bonferroni")
+  results$fdr = p.adjust(results$P, "fdr")
+  results = results[order(results$annot), ]
+  annot.type = unique(results$annot)
+  results$label.top = NA
+  results$resp = gsub("_differentially_expressed_enhancers", "", results$resp)
+  results$resp = toupper(results$resp)
+  
+  split = split(results, as.character(results$annot))
+  split = lapply(split, function(x) x[order(x$Pr...z.., decreasing = F), ])
+  
+  for(m in 1:length(split)){
+    
+    if(names(split)[[m]] == "HISTONE" | names(split)[[m]] == "DHS"){
+      
+      cell.grab.histone = c("brain|lobe|cortex|astro|cerebellum|pyramidal|lymph|B cell|frontal|hippo|cingulate|gyrus|neuro|pericyte|neutro|monocyte|dendritic|helper|lymphocyte|spleen|thymus|killer")
+      split[[m]] = split[[m]][grepl(cell.grab.histone,ignore.case = T, split[[m]]$resp),]
+      split[[m]] = split[[m]][!grepl("muscle|renal|liver|medalis|gastro",ignore.case = T, split[[m]]$resp),]
+      
+    }
+    
+    if(nrow(split[[m]]) < 2){ split[[m]]$label.top[[1]] = as.character(split[[m]]$resp[[1]])}
+    if(nrow(split[[m]]) > 2){ split[[m]]$label.top[1:2] = as.character(split[[m]]$resp[1:2])}
+  }
+  
+  results = as.data.frame(do.call(rbind, split))
+  # results$label.top[results$bonf > .05] <- NA
+  
+  col = rainbow(length(annot.cat))
+  names(col) = names(annot.cat)
+  col = as.data.frame(col)
+  col$features = as.character(rownames(col))
+  
+  n_tests = nrow(results)
+  alpha = .05/n_tests
+  alpha.z = qnorm(alpha)
+  
+  ## group annot.cat
+  
+  groups =  lapply(annot.cat, data.frame)
+  groups = ldply(groups)
+  colnames(groups) = c("features","annot")
+  
   
   results = merge(results, groups, by = "annot")
   results = merge(results, col , by ="features")
@@ -501,17 +571,23 @@ for (g in 1:length(gwas)){
   results$label.top[results$P > .05 & results$z.value < 0] <- NA
   
   
+  
+  # results$z.value[results$z.value > 8] <- 8
+  # results$z.value[results$z.value < -8] <- -8
+  
+  # results = results[results$enrich > 0, ]
+  
   trait.names = unique(results$trait)
   
-  g = ggplot(results, aes(x = results$features, y= results$z.value, col = results$features)) + theme_bw() +
-    geom_point(position = "jitter") +scale_color_brewer(palette="Dark2") +
-    xlab(NULL) + guides(col = FALSE) + geom_hline(yintercept = c(-alpha.z, 0, alpha.z), col = c("red", "black", "red"), linetype = "dotted", size = 0.5)  + ylim(min = min(-10, min(results$z.value*1.5)), max = max(10, max(results$z.value*1.5))) +
+  g = ggplot(results, aes(x = results$features, y= results$z.value, col = results$features)) + geom_point(position = "jitter") + scale_colour_brewer(palette="Dark2") + theme_bw() +
+    xlab(NULL) + guides(col = FALSE) + geom_hline(yintercept = c(-alpha.z, 0, alpha.z), col = c("red", "black", "red"), linetype = c("dotted", "solid", "dotted"), size = 0.5)  +
+    ylim(min = min(-10, min(results$z.value*1.5)), max = max(10, max(results$z.value*1.5))) +
     ylab("Annotation Enrichment (z-score)")  + geom_label_repel(label = results$label.top, size = 2)
   
   
   
   
-  png(paste(path_to_fleet,"/broad_plots/JITTERPLOT_TRAIT=",trait.names,".png", sep = ""), res = 300, units = "in",  width= 8, height = 7)
+  png(paste("C:/Users/HessJo/Dropbox/encode/broad_plots/ldfr_GLM-MP_TRAIT=",trait.names,".png", sep = ""), res = 300, units = "in",  width= 8, height = 7)
   print(g)
   dev.off()
   
@@ -519,25 +595,28 @@ for (g in 1:length(gwas)){
   sig = results
   
   box = ggplot(sig, aes(x = sig$features, y = sig$logP, fill = sig$features))+ theme_bw() + geom_hline(yintercept = -log10(alpha), col = "red", linetype="dashed") +
-    geom_boxplot(width = 0.5) + xlab(NULL) + ylab("Significance (OR > 0), -log10(P)") +scale_fill_brewer(palette="RdBu") +guides(fill = FALSE) 
+  geom_boxplot(width = 0.5) + xlab(NULL) + ylab("Significance (OR > 0), -log10(P)") +scale_fill_brewer(palette="Dark2") +guides(fill = FALSE) 
   
-  png(paste(path_to_fleet,"/broad_plots/BOXPLOT_TRAIT=",trait.names,".png", sep = ""), res =300, units = "in", height = 5, width = 7)
+  png(paste("C:/Users/HessJo/Dropbox/encode/broad_plots/ldfr_GLM-BOX_TRAIT=",trait.names,".png", sep = ""), res =300, units = "in", height = 5, width = 7)
   print(box)
   dev.off()
   
   ### X table 
   
   
+  require(xtable)
+  
   sig = results[results$OR > 0 & results$bonf < .05, ]
   sig$PVAL = format(sig$P, scientific=  T, digits = 3)
   sig$BONF= format(sig$bonf, scientific = T, digits = 3)
   sig$FREQ = format(sig$freq*100, digits= 1)
   
-  xtab = xtable(sig[,colnames(sig) %in% c("features", "resp","GWS_VAR_HITS", "OR", "CI_LOW", "CI_UP", "BONF", "FREQ", "PVAL" )])
-  print.xtable(xtab, type="html", file= paste(path_to_fleet,"/FLEETReport_",trait.names,".html", sep = ""))
+  xtab = xtable(sig[,colnames(sig) %in% c("features", "resp", "OR", "CI_LOW", "CI_UP", "BONF", "FREQ", "PVAL" )])
+  print.xtable(xtab, type="html", file= paste("C:/Users/HessJo/Dropbox/encode/ldfr_enrichmentreport_",trait.names,".html", sep = ""))
   
-  
-}
+
+ }
+
 
 
 
