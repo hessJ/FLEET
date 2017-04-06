@@ -155,7 +155,7 @@ paths = paths[grepl(".Rdata", paths)]
 
 
 ## Genomic annotations by position, type, and tissue of origin
-names(paths) = gsub(".Rdata", sep = ""), basename(paths))
+names(paths) = gsub(".Rdata", "", basename(paths))
 
 annot.cat = list(c("CODING", "INTRON", "FIVEUTR", "THREEUTR", "PROMOTER","SPLICESITE"),
                  "DHS", c("HISTONE"), c("TFBS"), c("RBP"), c("FANTOM_cell", "FANTOM_organ"))
