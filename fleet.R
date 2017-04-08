@@ -387,7 +387,7 @@ for(n in 1:length(ld.df.list)){
       ## Meta data for summary statistics
       freq_annot = table(df[,colnames(df) %in% tracks[[b]]])/nrow(df)
       
-      gwas.sig.annot.hits = df$INDEX[df$binary_hits  == 1 & df$LOGP >= gwas.sig.threshold]
+      gwas.sig.annot.hits = df$INDEX[df[,colnames(df) %in% tracks[[b]]] == 1 & df$LOGP >= gwas.sig.threshold]
       gwas.sig.annot.hits = paste(gwas.sig.annot.hits, collapse = "|")
       
       ## Linear regression -- enrichment test
