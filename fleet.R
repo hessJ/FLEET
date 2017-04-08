@@ -91,7 +91,7 @@ gwas.sig.threshold = -log10(5e-08)
 ### Prune 1KG reference 
 
 for( i in 1:length(ref_data)){
-  cat("\Pruning reference data for variants in high LD (short range)",i)
+  cat("\r Pruning reference data for variants in high LD (short range)",i)
   prune = paste("plink --bfile ", ref_data[[i]], " --maf .05 --indep 100 5 2 --out ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[i]]), sep = "")
   system(prune,show.output.on.console = FALSE)
 }
