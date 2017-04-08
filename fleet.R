@@ -170,6 +170,15 @@ for( i in 1:length(paths)){
   
   annot.gr = readRDS(paths[[i]])
   
+  ## For splice junctions, add a 20 base window 
+  if(names(paths)[[i]] == "SPLICESITE"){
+    
+    start(annot.gr) = start(annot.gr) - 20
+    end(annot.gr) = end(annot.gr) + 20
+    
+  }
+  
+  
   ## For cell/tissue enhancers add a 500 base window 
   if(names(paths)[[i]] == "FANTOM"){
     
