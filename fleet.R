@@ -560,12 +560,13 @@ for(n in 1:length(ld.df.list)){
     
     require(xtable)
     
-    sig = results[results$OR > 0 & results$bonf < .05, ]
+    sig = results[results$enrich > 0 & results$bonf < .05, ]
     sig$PVAL = format(sig$P, scientific=  T, digits = 3)
     sig$BONF= format(sig$bonf, scientific = T, digits = 3)
     sig$FREQ = format(sig$freq*100, digits= 1)
-    
-    xtab = xtable(sig[,colnames(sig) %in% c("features", "resp", "OR", "CI_LOW", "CI_UP", "BONF", "FREQ", "PVAL" )])
+    sig$BETA = sig$Estimate
+    sig$SE = sig$`Std. Error.`
+    xtab = xtable(sig[,colnames(sig) %in% c("features", "resp", "BETA", "SE", "BONF", "FREQ", "PVAL")])
     print.xtable(xtab, type="html", file= paste(path_to_fleet,"/enrichmentreport_",trait.names,".html", sep = ""))
     
     
