@@ -19,8 +19,8 @@ setwd(paste(path_to_fleet))
 
 ## Set LD-clumping parameters for Plink
 
-r2 = 0.2 ## minimum r2 value for a SNP for clumping
-ld_window = 500 ## minimum distance between markers for clumping
+r2 = 0.1 ## minimum r2 value for a SNP for clumping
+ld_window = 1000 ## minimum distance between markers for clumping
 snp_field = "snpid" ## column name for SNPs
 clump_field = "p" ## Column name for p-value3
 
@@ -76,6 +76,12 @@ ref_data
 ### Path to GWAS file
 gwas = paste(path_to_gwas, sep = "")
 
+## Read GWAS file and extract genome-wide significant markers
+read.gwas = fread(gwas, header = T)
+read.gwas = as.data.frame(read.gwas)
+sig.gwas = read.gwas[read.gwas[,colnames(read.gwas) %in% clump_field] < 5e-08, ]
+
+
 ### threshold for declaring a SNP genome-wide significant based on its -log10(P)
 gwas.sig.threshold = -log10(5e-08)
 
@@ -102,6 +108,10 @@ prune.in = lapply(prune.in, function(x) read.table(x, header = F))
 sum(unlist(lapply(prune.in, nrow))) ## total number of SNPs retained after high-LD pruning step
 
 
+prune.in = as.data.frame(do.call(rbind, prune.in))
+prune.in.plus = c(as.character(prune.in[,1]), sig.gwas[,colnames(sig.gwas) %in% clump_field])
+write.table(prune.in.plus, file = paste(path_to_fleet,"/pruned/PRUNE.IN",sep = ""), quote = F, row.names = F, col.names = F)
+
 
 
 
@@ -112,7 +122,7 @@ sum(unlist(lapply(prune.in, nrow))) ## total number of SNPs retained after high-
 
 
 
-## Clump summary statistics for GWAS provided in the list 'gwas'
+## Clump summary statistics for GWAS provided in the list 'gwas' (integrates genome-wide significant markers that were dropped from LD-prune)
 for( i in 1:length(gwas)){
   
   
@@ -126,7 +136,7 @@ for( i in 1:length(gwas)){
   
   for( j in 1:length(ref_data)){
     
-    cmd = paste("plink --bfile ", ref_data[[j]]," --exclude ",path_to_fleet,"/dupvars.txt --freq --clump ", gwas[[i]], " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", r2," --clump-kb ",ld_window," --extract ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[j]]),".prune.in --clump-snp-field ",snp_field," --clump-field ",clump_field," --out F:/ref_data/g1000/qc/clumped/CLUMP_",basename(gwas[[i]]),"_",j, sep = "")
+    cmd = paste("plink --bfile ", ref_data[[j]]," --exclude ",path_to_fleet,"/dupvars.txt --freq --clump ", gwas[[i]], " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", r2," --clump-kb ",ld_window," --extract ",path_to_fleet,"/pruned/PRUNE.IN --clump-snp-field ",snp_field," --clump-field ",clump_field," --out F:/ref_data/g1000/qc/clumped/CLUMP_",basename(gwas[[i]]),"_",j, sep = "")
     
     system(cmd,show.output.on.console = FALSE)
     
