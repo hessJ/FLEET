@@ -12,7 +12,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 ## FLEET is a modular script
 The first two modules are wrappers for Plink. The last three modules perform the main operations of FLEET and produce output.
 
-1. `LD pruning` in Module A
+1. `LD pruning` in Module A (Spares genome-wide significant markers)
 2. `GWAS clumping` in Module B
 3. `Annotating hg19 variants` in Module C
 4. `Enrichment tests` in Module D
