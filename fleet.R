@@ -411,7 +411,7 @@ for(n in 1:length(ld.df.list)){
       
       ## Linear regression -- enrichment test
       
-      lmform = formula(paste("ZSCORE ~ LD_FRIENDS + ", tracks[[b]]))
+      lmform = formula(paste("ZSCORE ~ LD_FRIENDS + MAF + ", tracks[[b]]))
       fit = lm(lmform, data = df, weights = (1/df$MAF))
       coef = summary(fit)$coefficients
       coef = as.data.frame(coef)
