@@ -165,14 +165,14 @@ for( i in 1:length(gwas)){
 
 
 ### Path to functional regulatory annotations
-paths = list.files(path = path_to_fleet, full.names = T, pattern = "DHS|CODING|PROMOTER|SPLICESITE|UTR|FANTOM|INTRON|HISTONE|RBP|TFBS")
+paths = list.files(path = path_to_fleet, full.names = T, pattern = "CC|MF|PANTHER|DHS|CODING|PROMOTER|SPLICESITE|UTR|FANTOM|INTRON|HISTONE|RBP|TFBS")
 paths = paths[grepl(".Rdata", paths)]
 
 
 ## Genomic annotations by position, type, and tissue of origin
 names(paths) = gsub(".Rdata", "", basename(paths))
 
-annot.cat = list(c("CODING", "INTRON", "FIVEUTR", "THREEUTR", "PROMOTER","SPLICESITE"),
+annot.cat = list(c("CODING", "INTRON", "FIVEUTR", "THREEUTR", "PROMOTER","SPLICESITE"), c("PANTHER", "CC","MF"),
                  "DHS", c("HISTONE"), c("TFBS"), c("RBP"), c("FANTOM"))
 
 
@@ -457,8 +457,7 @@ for(n in 1:length(ld.df.list)){
       df.stats = as.data.frame(do.call(cbind, list(df.hold, hit.counts)))
       
       
-      new.tracks = sub("[[:punct:]]", "_", tracks[[b]])
-      new.tracks = gsub("[-|,/.;:'() ]", "_", new.tracks)
+      new.tracks = gsub("[-|,/.;:'() ]", "_", tracks[[b]])
       # new.tracks = paste("ID_", new.tracks, sep="")
       colnames(df.stats)[ncol(df.stats)] = "hits"
       
@@ -495,7 +494,7 @@ for(n in 1:length(ld.df.list)){
       # coef$OR = exp(coef$Estimate)
       coef$pred = rownames(coef)
       coef$df = paste(summary(fit)$df, sep ="", collapse= "//")
-      coef$resp = tracks[[b]]
+      coef$resp = new.tracks
       coef$rsq = summary(fit)$r.squared
       coef$GWS_VAR_HITS = gw.vars
       coef$freq = freq_annot[[2]]
@@ -623,7 +622,9 @@ for(n in 1:length(ld.df.list)){
 
 
   
-  names(annot.cat) = c("Gene regions", "DHS", "Chromatin modifications",
+  names(annot.cat) = c("Gene regions",
+                       "Pathways",
+                       "DHS", "Chromatin modifications",
                        "TF binding sites", "RBP binding sites",
                        "Enhancers")
   
@@ -741,10 +742,11 @@ for(n in 1:length(ld.df.list)){
     sig = results[results$enrich > 0 & results$bonf < .05, ]
     sig$PVAL = format(sig$P, scientific=  T, digits = 3)
     sig$BONF= format(sig$bonf, scientific = T, digits = 3)
+    sig$FDR= format(sig$fdr, scientific = T, digits = 3)
     sig$FREQ = format(sig$freq*100, digits= 1)
     sig$BETA = sig$Estimate
     sig$SE = sig$`Std. Error.`
-    xtab = xtable(sig[,colnames(sig) %in% c("features", "resp", "BETA", "SE", "BONF", "FREQ", "PVAL")])
+    xtab = xtable(sig[,colnames(sig) %in% c("features", "FDR", "resp", "BETA", "SE", "BONF", "FREQ", "PVAL")])
     print.xtable(xtab, type="html", file= paste(path_to_fleet,"/enrichmentreport_",trait.names,".html", sep = ""))
     
     
