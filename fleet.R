@@ -501,71 +501,78 @@ for(n in 1:length(ld.df.list)){
       coef$freq = freq_annot[[2]]
       
       ## Rapid permutation (GW-SIG):
+      ## Rapid permutation (GW-SIG):
       pval.check = coef$`Pr(>|t|)`[coef$pred %in% "hits"] 
+      pval.check
+      
+      perm_df <- data.frame(GW1_5e08_perm = NA, 
+                            GW2_1e06_perm = NA,
+                            GW3_1e04_perm = NA)
       
       if(pval.check < permStartThreshold) {
+      
+      gws.hits.1 = df.stats[df.stats$P < 5e-08, ]
+      gws.hits.2 = df.stats[df.stats$P < 1e-06, ]
+      gws.hits.3 = df.stats[df.stats$P < 1e-04, ]
+      
+      gw.sig.list = list(gws.hits.1, gws.hits.2, gws.hits.3)
+      names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
+      
+      perm_p = list(slot1 = NA, slot2= NA, slot3=NA)
+      
+      for( s in 1:length(gw.sig.list)){ 
         
-        gws.hits.1 = df.stats[df.stats$P < 5e-08, ]
-        gws.hits.2 = df.stats[df.stats$P < 1e-06, ]
-        gws.hits.3 = df.stats[df.stats$P < 1e-04, ]
+        set = gw.sig.list[[s]]
         
-        gw.sig.list = list(gws.hits.1, gws.hits.2, gws.hits.3)
-        names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
+        set.hits = sum(set$hits)
         
-        perm_p = list(slot1 = NA, slot2= NA, slot3=NA)
+        cat("\r Permutations for GW-significance level:", names(gw.sig.list)[[s]])
         
-        for( s in 1:length(gw.sig.list)){ 
+        cat("\n")
+        
+        if( nrow(set) > 0){
           
-          set = gw.sig.list[[s]]
           
-          set.hits = sum(set$hits)
+          set.dist = set$MAF
           
-          cat("\r Permutations for GW-significance level:", names(gw.sig.list)[[s]])
+          gwas.maf = mean(set.dist)
+          gwas.maf.sd = 1.96 * (sd(set.dist)/sqrt(length(set.dist)))
           
-          cat("\n")
+          maf.bounds = c(gwas.maf - gwas.maf.sd, gwas.maf + gwas.maf.sd)
+          gwas.sig.annot.hits = paste(gwas.sig.annot.hits, collapse = "|")
           
-          if( nrow(set) > 0){
-            
-            
-            set.dist = set$MAF
-            
-            gwas.maf = mean(set.dist)
-            gwas.maf.sd = 1.96 * (sd(set.dist)/sqrt(length(set.dist)))
-            
-            maf.bounds = c(gwas.maf - gwas.maf.sd, gwas.maf + gwas.maf.sd)
-            gwas.sig.annot.hits = paste(gwas.sig.annot.hits, collapse = "|")
-            
-            
-            perm_hits = list()
-            
-            for(p in 1:1000){
+          
+          perm_hits = list()
+          
+          for(p in 1:1000){
+            # cat("\n")
+            cat("\r MAF-matched permutation",p)
+            repeat{
               
-              cat("\r MAF-matched permutation",p)
-              repeat{
-                
-                grab = df.stats[df.stats$MAF > maf.bounds[[1]] & df.stats$MAF < maf.bounds[[2]], ]
-                compare = t.test(grab$MAF, set.dist)
-                
-                if(compare$p.value > .05) break}
+              grab = df.stats[df.stats$MAF > maf.bounds[[1]] & df.stats$MAF < maf.bounds[[2]], ]
+              compare = t.test(grab$MAF, set.dist)
               
-              grab = grab[sample(nrow(grab)), ]
-              grab = grab$hits[1:nrow(set)]
-              
-              perm_hits[[p]] = sum(grab > 0)/length(grab)
-              
-            }
+              if(compare$p.value > .05) break}
             
-            perm_p[[s]] = sum((set.hits/nrow(set)) < unlist(perm_hits)) / 1000
+            grab = grab[sample(nrow(grab)), ]
+            grab = grab$hits[1:nrow(set)]
+            
+            perm_hits[[p]] = sum(grab > 0)/length(grab)
             
           }
+          
+          perm_p[[s]] = sum((set.hits/nrow(set)) < unlist(perm_hits)) / 1000
+          cat("\n")
+          
         }
       }
-      
+     
       perm_df <- data.frame(GW1_5e08_perm = perm_p[[1]], 
                             GW2_1e06_perm = perm_p[[2]],
-                            GW3_1e04_perm = perm_p[[3]])
+                            GW3_1e04_perm = perm_p[[3]]) 
+      }
       
-      coef = cbind(coef, perm_df)
+        coef = cbind(coef, perm_df)
       
       
       
