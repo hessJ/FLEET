@@ -292,7 +292,7 @@ for( i in 1:length(gwas)){
   print(paste("Calculating LD for index markers"))
   for( j in 1:length(ref_data)){
     
-    cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --ld-snp-list ", path_to_fleet,"/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window-r2 0.8 --out ", path_to_fleet,"/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
+    cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --ld-snp-list ", path_to_fleet,"/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window 99999 --ld-window-r2 0.8 --out ", path_to_fleet,"/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
     
     cmd = gsub("\n", "", cmd)
     cmd
