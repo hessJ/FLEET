@@ -246,7 +246,7 @@ ld.df.list <- list()
 glm_combine = list()
 for( i in 1:length(gwas)){
   
-  clumped = list.files(path =paste(path_to_fleet,"/clumped/",sep=""), full.names = T, pattern = glob2rx("CLUMP_*.clumped"))
+  clumped = list.files(path = "F:/ref_data/g1000/qc/clumped/", full.names = T, pattern = glob2rx("CLUMP_*.clumped"))
   clumped = clumped[grepl(basename(gwas[[i]]), clumped)]
   
   
@@ -274,7 +274,7 @@ for( i in 1:length(gwas)){
   
   ## freqs in clump
   
-  freqs = list.files(path = "G:/PGC_Results/clumped", full.names = T, pattern = glob2rx("CLUMP_*.frq"))
+  freqs = list.files(path = "F:/ref_data/g1000/qc/clumped", full.names = T, pattern = glob2rx("CLUMP_*.frq"))
   freqs = freqs[grepl(basename(gwas[[i]]), freqs)]
   
   
@@ -287,12 +287,13 @@ for( i in 1:length(gwas)){
   
   
   ### Calculate LD between index markers and surrounding markers:
-  write.table(clumped.df$SNP, file = paste(path_to_fleet,"/clumped/INDEX.snplist",sep=""), quote = F, col.names = F)
+  write.table(clumped.df$SNP, file = "G:/PGC_Results/clumped/INDEX.snplist", quote = F, col.names = F)
   
   print(paste("Calculating LD for index markers"))
   for( j in 1:length(ref_data)){
     
-    cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --ld-snp-list ", path_to_fleet,"/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window 99999 --ld-window-r2 0.8 --out ", path_to_fleet,"/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
+    # cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --exclude F:/ref_data/g1000/dupvars.txt --ld-snp-list G:/PGC_Results/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window-r2 0.6 --out G:/PGC_results/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
+    cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --ld-window 99999 --exclude F:/ref_data/g1000/dupvars.txt --ld-snp-list G:/PGC_Results/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window-r2 0.1 --out G:/PGC_results/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
     
     cmd = gsub("\n", "", cmd)
     cmd
@@ -310,7 +311,8 @@ for( i in 1:length(gwas)){
   ld.int = ld.int[,colnames(ld.int) %in% c("SNP_A", "CHR_A", "BP_A", "SNP_B", "R2")]
   colnames(ld.int) = c("CHR","BP","INDEX","SNP","R2")
   
-
+  ### subset ld.df by SNPs in high ld (r>0.6) to index marker
+  # ld.df = ld.df[ld.df$SNP %in% ld.int$SNP, ]
   
   ld.maf = merge(ld.df , freqs.df , by = "SNP")
   
@@ -340,17 +342,25 @@ for( i in 1:length(gwas)){
   ld.df$LD_FRIENDS = ld_friends$Freq
   ld.df$LD_FRIENDS[is.na(ld.df$LD_FRIENDS)] = 0
   
+  ## calculate LD scores for index SNPs 
+  
+  ld.score = aggregate(ld.int$R2, by = list(ld.int$INDEX), sum)
+  colnames(ld.score) = c("INDEX", "LDSCORE")
+  
   ## association scores 
   ld.df$LOGP = -log10(ld.df$P)
+  ld.df$P[ld.df$P < 1e-15] <- 1e-15
   ld.df$ZSCORE = qnorm(1-ld.df$P/2)
+  ld.df = merge(ld.df, ld.score, by="INDEX")
   
   ld.df.list[[i]] = ld.df
   
 }
 
+## FLEET enrichment analysis
 
 
-
+start_clock = proc.time()
 
 for(n in 1:length(ld.df.list)){
   
@@ -361,218 +371,158 @@ for(n in 1:length(ld.df.list)){
   
   for( a in 1:length(paths)){
     
-    cat("\r Annotations ", a);flush.console()
-    
-    
+    cat("\r    Loading annotations:",a,"...")
+
     annot.gr = readRDS(paths[[a]])
     
-    if(names(paths)[[a]] == "MF" | names(paths)[[a]] == "BP" | names(paths)[[a]] =="CC" | names(paths)[[a]] == "PANTHER"){
-      
-      start(annot.gr) = start(annot.gr)-20e3
-      end(annot.gr) = end(annot.gr)+20e3
-    }
+    
+    # merge data table with ld.df stats
+    tmp = merge(data.table(ld.df[,c("SNP","INDEX")]), annot.gr, by = "SNP", all.x = T)
+    
+    tmp = as.data.frame(tmp)
+    tmp = tmp[,!colnames(tmp) %in% "SNP"]
+    tmp = tmp[!duplicated(tmp$INDEX), ]
+    tmp[is.na(tmp)] = 0 
+    
+    # merge index information
+    all_df = merge(data.table(ld.df[,!colnames(ld.df) %in% "SNP"]), tmp, by = "INDEX")
+    all_df = all_df[!duplicated(all_df)]
+    all_df = as.data.frame(all_df)
     
     
-    if(names(paths)[[a]] == "SPLICESITE"){
-      
-      start(annot.gr) = start(annot.gr) - 20
-      end(annot.gr) = end(annot.gr) + 20
-      
-    }
+    new.tracks = sub("[[:punct:]]", "", colnames(all_df))
+    new.tracks = gsub("[-|,/.;:'() ]", "", colnames(all_df))
+    new.tracks = gsub("[+]", "_", new.tracks)
+    colnames(all_df) = new.tracks
     
-    ## For cell/tissue enhancers add a 500 base window 
-    if(names(paths)[[a]] == "FANTOM"){
-      
-      start(annot.gr) = start(annot.gr) - 200
-      end(annot.gr) = end(annot.gr) + 200
-      
-    }
+    # threshold for declaring genome-wide significace 
+    gwas.sig.threshold = -log10(5e-08) # threshold for calling INDEX marker genome-wide significant
     
-    ## For histone/DHS, subset brain and immune cell/tissue types
-    if(names(paths)[[a]] == "HISTONE" | names(paths)[[a]] == "DHS" ){
-      # annot.gr = annot.gr[grepl(brain.tissue, elementMetadata(annot.gr)$tissue)]
-      
-      # cell.grab.histone = c("brain|lobe|cortex|astrocy|cerebellum|pyramidal|lymph|B cell|frontal|hippo|cingulate|gyrus|neuro|pericyte|neutro|monocyte|dendritic|helper|lymphocyte|spleen|thymus|killer")
-      # 
-      # annot.gr = annot.gr[grepl(cell.grab.histone, annot.gr$tissue),]
-      # annot.gr = annot.gr[!grepl("renal|liver|kidney", annot.gr$tissue), ]
-      # 
-      elementMetadata(annot.gr)$id = paste(elementMetadata(annot.gr)$id,"_", elementMetadata(annot.gr)$tissue, sep = "" )
-    }
-    
-    overlaps = findOverlaps(snp137, annot.gr) ## SNPs overlapping annotations
-    
-    snp.hits = names(snp137)[queryHits(overlaps)]
-    
-    features = elementMetadata(annot.gr)$id[subjectHits(overlaps)]
-    widths = width(annot.gr)[subjectHits(overlaps)]
-    
-    snp.comb = data.table(SNP = as.character(snp.hits), ID =  gsub("-human", "", as.character(features)))
-    
-    
-    tmp = snp.comb
-    tmp$widths = widths
-    tmp = tmp[!duplicated(tmp)]
-    
-    
-    # mean.widths = aggregate(tmp$widths, by=list(tmp$ID), mean)
-    # mean.widths = mean.widths[order(mean.widths$x, decreasing = T), ]
-    
-    
-    gwas.sig.threshold = -log10(5e-08)
-    
-    tracks = unique(tmp$ID)
-    
-    tmp = tmp[tmp$SNP %in% ld.df$SNP,]
-    
-    order.vars = as.character(unique(ld.df$INDEX))
-    
-    
-    df.hold = ld.df[!duplicated(ld.df$INDEX), ]
-    df.hold = df.hold[match(order.vars, df.hold$INDEX), ]
+    # grab unique track names (for looping)
+    tracks = colnames(all_df)[-c(1:7)]
+    names(all_df)[names(all_df) %in% tracks] = paste("ID_", tracks, sep = "")
+    tracks = paste("ID_", tracks, sep = "")
     
     q_plot = list()
     c_list = list()
     glm_list = list()
     keep.track.names= list()
+    bounds_df = list()
     
     for(b in 1:length(tracks)){
       
       cat("\r Enrichment analysis in LD intervals (", names(paths)[[a]],")", b, "of", length(tracks))
-      
-      sub = tmp[tmp$ID %in% tracks[[b]],]
-      
-      if(nrow(sub) < 1) next
-      
-      index.hits = unique(ld.df$INDEX[ld.df$SNP %in% sub$SNP])
-      sub = data.frame(INDEX = index.hits, ID = tracks[[b]], hits = 1)
-      
-      sub = sub[match(order.vars, sub$INDEX), ]
-      sub$INDEX = order.vars
-      sub$hits[is.na(sub$hits)] = 0 
-      hit.counts = sub$hits
-      
-      
-      
-      df.stats = as.data.frame(do.call(cbind, list(df.hold, hit.counts)))
-      
-      
-      new.tracks = gsub("[-|,/.;:'() ]", "_", tracks[[b]])
-      # new.tracks = paste("ID_", new.tracks, sep="")
-      colnames(df.stats)[ncol(df.stats)] = "hits"
-      
-      keep.track.names[[b]] = new.tracks
-      
-      freq_annot = table(df.stats[,ncol(df.stats)])/nrow(df.stats)
+      # 
+      freq_annot = table(all_df[,colnames(all_df) %in% tracks[[b]]])/nrow(all_df)
       
       if(length(freq_annot) < 2) next
       
       ## Enrichment analysis
       
       
-      gwas.sig.annot.hits = df.stats$INDEX[df.stats$hits  == 1 & df.stats$LOGP >= gwas.sig.threshold]
-      n.gwas.hits = length(gwas.sig.annot.hits)
+      gwas.sig.annot.hits = all_df[all_df$LOGP >= gwas.sig.threshold & all_df[,colnames(all_df) %in% tracks[[b]]] == 1, ]
+      n.gwas.hits = nrow(gwas.sig.annot.hits)
       
       
-      gw.vars = paste(gwas.sig.annot.hits, collapse = "|", sep = "")
-      
-      ### threshold SNPs by GWAS significance 
-      
-      group_counts = table(df.stats[,ncol(df.stats)])
-      min_group = min(group_counts)
-      # formula  = formula(paste(tracks[[b]], " ~ ZSCORE + MAF + LD_FRIENDS"))
-      # fit = speedglm(formula, data = df,  family=binomial('logit'))
-      # df = df.stats[!is.infinite(df.stats$ZSCORE), ]
+      gw.vars = paste(gwas.sig.annot.hits$INDEX, collapse = "|", sep = "")
       
       
+      lmform = formula(paste("ZSCORE ~ LDSCORE  + MAF  + ", tracks[[b]]))
+  
       
-      lmform = formula(paste("ZSCORE ~ LD_FRIENDS  + MAF + hits"))
-      fit = lm(lmform, data = df.stats, weights = (1/df.stats$MAF))
+      fit = lm(lmform, data = all_df, weights = (1/all_df$MAF))
       # fit = logistf::logistf(binary_hits  ~ PT + MAF, data = df)
       coef = summary(fit)$coefficients
       coef = as.data.frame(coef)
       # coef$OR = exp(coef$Estimate)
       coef$pred = rownames(coef)
       coef$df = paste(summary(fit)$df, sep ="", collapse= "//")
-      coef$resp = new.tracks
+      coef$resp = tracks[[b]]
       coef$rsq = summary(fit)$r.squared
       coef$GWS_VAR_HITS = gw.vars
       coef$freq = freq_annot[[2]]
+      coef$annot = basename(lapply(strsplit(paths[[a]], "[+]"), function(x) x[[1]])[[1]])
       
       ## Rapid permutation (GW-SIG):
-      ## Rapid permutation (GW-SIG):
-      pval.check = coef$`Pr(>|t|)`[coef$pred %in% "hits"] 
+      pval.check = coef$`Pr(>|t|)`[coef$pred %in% tracks[[b]]] 
       pval.check
-      
-      perm_df <- data.frame(GW1_5e08_perm = NA, 
+
+      perm_df <- data.frame(GW1_5e08_perm = NA,
                             GW2_1e06_perm = NA,
                             GW3_1e04_perm = NA)
-      
-      if(pval.check < permStartThreshold) {
-      
-      gws.hits.1 = df.stats[df.stats$P < 5e-08, ]
-      gws.hits.2 = df.stats[df.stats$P < 1e-06, ]
-      gws.hits.3 = df.stats[df.stats$P < 1e-04, ]
-      
-      gw.sig.list = list(gws.hits.1, gws.hits.2, gws.hits.3)
-      names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
-      
-      perm_p = list(slot1 = NA, slot2= NA, slot3=NA)
-      
-      for( s in 1:length(gw.sig.list)){ 
+
+      if(pval.check < permStartThreshold & coef$Estimate[coef$pred %in% tracks[[b]]] > 0) {
+
+        gws.hits.1 = all_df[all_df$P < 5e-08, ]
+        gws.hits.2 = all_df[all_df$P < 1e-06, ]
+        gws.hits.3 = all_df[all_df$P < 1e-04, ]
+
+        gw.sig.list = list(gws.hits.1, gws.hits.2,gws.hits.3)
+        names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
+
+        perm_p = list(slot1 = NA, slot2= NA, slot3=NA)
         
-        set = gw.sig.list[[s]]
-        
-        set.hits = sum(set$hits)
-        
-        cat("\r Permutations for GW-significance level:", names(gw.sig.list)[[s]])
-        
-        cat("\n")
-        
-        if( nrow(set) > 0){
+        bounds = list()
+        for( s in 1:length(gw.sig.list)){
+
+          set = gw.sig.list[[s]]
+
+          if(length(tracks) > 1){set.hits = colSums(set[,colnames(set) %in% tracks])} else {set.hits = sum(set[,colnames(set) %in% tracks])}
+         
+          # iterate over annotations, calculate summary statistics
+          premelt = set[,colnames(set) %in% c("INDEX", tracks)]
+          premelt = melt(premelt)
+          hit_melt = premelt[premelt$value == 1, ]
           
+          snp_var_names = paste(premelt$INDEX, collapse = "|", sep = "")
           
-          set.dist = set$MAF
+          if(nrow(set) < 1) next
           
-          gwas.maf = mean(set.dist)
-          gwas.maf.sd = 1.96 * (sd(set.dist)/sqrt(length(set.dist)))
-          
-          maf.bounds = c(gwas.maf - gwas.maf.sd, gwas.maf + gwas.maf.sd)
-          gwas.sig.annot.hits = paste(gwas.sig.annot.hits, collapse = "|")
-          
-          
-          perm_hits = list()
-          
-          for(p in 1:1000){
-            # cat("\n")
-            cat("\r MAF-matched permutation",p)
-            repeat{
-              
-              grab = df.stats[df.stats$MAF > maf.bounds[[1]] & df.stats$MAF < maf.bounds[[2]], ]
-              compare = t.test(grab$MAF, set.dist)
-              
-              if(compare$p.value > .05) break}
+          premelt.counts = table(hit_melt$variable)
+          premelt = merge(set[,!colnames(set) %in% tracks], premelt, by ="INDEX")
+
+          if( nrow(premelt) > 0){
+
+            gwas.maf = aggregate(premelt$MAF, by=list(premelt$variable), mean)
+            gwas.maf.sd = aggregate(premelt$MAF, by=list(premelt$variable), function(x) c(sd(x), sqrt(length(x))))
+            gwas.maf.sd$ci = 1.96 * gwas.maf.sd$x[,1]/gwas.maf.sd$x[,2]
             
-            grab = grab[sample(nrow(grab)), ]
-            grab = grab$hits[1:nrow(set)]
+            gwas.ld = aggregate(premelt$LDSCORE, by=list(premelt$variable), mean)
+            gwas.ld.sd = aggregate(premelt$LDSCORE, by=list(premelt$variable), function(x) c(sd(x), sqrt(length(x))))
+            gwas.ld.sd$ci = 1.96 * gwas.ld.sd$x[,1]/gwas.ld.sd$x[,2]
             
-            perm_hits[[p]] = sum(grab > 0)/length(grab)
+            gwas.counts = nrow(set)
+            gwas.hits = table(as.character(premelt$variable))
             
+            
+            t.out =  data.frame(id = gwas.maf$Group.1,
+                                     pthres = names(gw.sig.list)[[s]], 
+                                     n_gwas_var = gwas.counts,
+                                     n_gwas_var_hits = as.vector(gwas.hits), 
+                                     mean_maf = gwas.maf$x, 
+                                     ci_maf = gwas.maf.sd$ci,
+                                     mean_ldscore = gwas.ld$x, 
+                                     ci_ldscore = gwas.ld.sd$ci,
+                                    index = snp_var_names)
+            
+            t.out$ci_maf[is.na(t.out$ci_maf)] = t.out$mean_maf[is.na(t.out$ci_maf)]
+            t.out$ci_ldscore[is.na(t.out$ci_ldscore)] = t.out$mean_ldscore[is.na(t.out$ci_ldscore)]
+
+            bounds[[s]] = t.out
+            
+
           }
           
-          perm_p[[s]] = sum((set.hits/nrow(set)) < unlist(perm_hits)) / 1000
-          cat("\n")
-          
         }
-      }
-     
-      perm_df <- data.frame(GW1_5e08_perm = perm_p[[1]], 
-                            GW2_1e06_perm = perm_p[[2]],
-                            GW3_1e04_perm = perm_p[[3]]) 
+        
+        bounds_df[[b]] = do.call(rbind, bounds)
+        
+
+        # perm_df <- data.frame(GW1_5e08_perm = perm_p[[1]],
+                              # GW2_1e06_perm = perm_p[[2]])
       }
       
-        coef = cbind(coef, perm_df)
-      
+      # coef = cbind(coef, bounds_df)
       
       
       glm_list[[b]] = coef
@@ -581,35 +531,107 @@ for(n in 1:length(ld.df.list)){
       
     }
     
+    all_bounds = ldply(bounds_df)
+    all_bounds = all_bounds[!duplicated(all_bounds), ]
     
+    split_bounds = split(all_bounds, all_bounds$id)
+    
+    no_rows = lapply(split_bounds, nrow)
+    no_rows = which(unlist(no_rows) < 1)
+    
+    if(length(no_rows) > 0){split_bounds = split_bounds[-no_rows]}
+    
+    all_df = data.table(all_df)
+    
+    ## Permutations over set 
+    
+    if(length(split_bounds) > 0){
+
+    for(p in 1:length(split_bounds)){
+      
+      cat("\rPermutation of set:", p)
+      splim = split_bounds[[p]]
+      
+      if(nrow(splim) < 1) next
+      
+      
+      grab = lapply(1:nrow(splim), function(x) all_df[all_df$MAF > splim$mean_maf[[x]] - splim$ci_maf[[x]] &  
+                                                        all_df$MAF < splim$mean_maf[[x]] + splim$ci_maf[[x]]])
+      
+    
+      sizes = lapply(grab, nrow)
+      
+      
+      
+      grab = lapply(grab, data.frame)
+      size_sample = splim$n_gwas_var
+     
+      size_error = which(unlist(sizes) < unlist(size_sample))
+  
+      
+      sample_sum = list()
+      for( perms in 1:nPerms){
+       
+      # cat("\r Sampling SNPs from LD-score matched distribution:",perms)
+      
+      sampled = lapply(1:length(size_sample), function(x) grab[[x]][sample(nrow(grab[[x]]), size_sample[[x]]), ])
+      sampled = lapply(sampled, function(x) x[,colnames(x) %in% names(split_bounds)[[p]]])
+      sampled = lapply(sampled, sum)
+      names(sampled) = splim$pthres
+      sample_sum[[perms]] = sampled
+      
+      }
+      
+      if(nrow(splim) == 1){sdf = unlist(sample_sum); splim$perm_pval = sum(sdf > splim$n_gwas_var_hits)/nPerms}
+
+      
+      if(nrow(splim ) > 1){
+        
+        sdf = as.data.frame(do.call(rbind, sample_sum))
+        sdf_sum = lapply(sdf, function(x) unlist(x))
+        
+        sdf_pval = list()
+        for( z in 1:nrow(splim)){
+          sdf_pval[[z]] = sum(sdf_sum[[z]]/size_sample > splim$n_gwas_var_hits[[z]]/splim$n_gwas_var[[z]])/nPerms
+        }
+        
+        splim$perm_pval = unlist(sdf_pval)
+      
+        
+      }
+      
+      
+      split_bounds[[p]] = splim
+      
+    }
+
+    perm_annot = as.data.frame(do.call(rbind, split_bounds))
+    perm_annot$perm_pval[perm_annot$perm_pval == 0] = 1/nPerms
+    
+    write.csv(perm_annot, file = paste(summary_stats, names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[n]]), sep = ""), "_PERMUTATION.csv", sep = "" ), quote = F, row.names = F)
+    }
     
     cat("\n")
     
     
     glm_all = ldply(glm_list)
-    glm_all = glm_all[glm_all$pred %in% "hits",]
-    # glm_all$pred = unlist(keep.track.names)[[1]]
-    glm_all$fdr = p.adjust(glm_all[,4], "fdr")
-    glm_all$bonf = p.adjust(glm_all[,4], "bonferroni")
+    glm_all = glm_all[glm_all$pred %in% tracks,]
     glm_all = glm_all[order(glm_all[,4], decreasing= F), ]
-    glm_all$annot = names(paths)[[a]]
     glm_all$trait = basename(gwas[[n]])
-    
-    
     glm_all = glm_all[order(glm_all$`Pr(>|t|)`,decreasing = T),]
     
     glm_trait[[a]] = glm_all
     
     
-    # write.csv(coef_all, file = paste("C:/Users/HessJo/Dropbox/encode/summary_stats/", names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[i]]), sep = ""), "_REGRESSION.csv", sep = "" ), quote = F, row.names = F)
-    write.csv(glm_all, file = paste("C:/Users/HessJo/Dropbox/encode/summary_stats/LM-PERM_", names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[n]]), sep = ""), "_REGRESSION.csv", sep = "" ), quote = F, row.names = F)
-    
+    write.csv(glm_all, file = paste(summary_stats, names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[n]]), sep = ""), "_REGRESSION.csv", sep = "" ), quote = F, row.names = F)
+   
     gc()
   }
   
   glm_combine[[n]] = glm_trait
   
 }
+
 
 
 
