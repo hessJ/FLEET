@@ -20,7 +20,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 
     Rscript FLEET.R -h
     
-    ==========================================================
+  ```  ==========================================================
   *
   * Functional LD-clump EnrichmEnt Test (FLEET)
   *
@@ -64,7 +64,7 @@ Options:
 		Number of cores for parallelization [default = 1]
 
 	-h, --help
-		Show this help message and exit
+		Show this help message and exit```
 
 
 #### GNU GENERAL PUBLIC LICENSE v3
