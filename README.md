@@ -45,8 +45,8 @@ Options:
 	-o CHARACTER, --out=CHARACTER
 		output file name [default = out.txt]
 
-	-r2 CHARACTER, --r2=CHARACTER
-		output file name [default = out.txt]
+	-r2 DOUBLE, --r2=DOUBLE
+		R-squared threshold for linkage disequilibrium calculations [default = 0.2]
 
 	-ldw INTEGER, --ld-window=INTEGER
 		Size of window (kilobases) for calculating linkage disequilibrium [default = 1000]
