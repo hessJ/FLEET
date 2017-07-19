@@ -6,6 +6,13 @@ This tool is used for biological interpretation of GWAS signals for polygenic ph
 ### Please visit the Wiki page to set up FLEET on your workstation
 https://github.com/hessJ/FLEET/wiki
 
+#### Download and install
+
+     git clone https://github.com/hessJ/FLEET
+
+#### Check for updates
+
+     git pull
 
 A description of the method is provided in the powerpoint slides (fleet_slides.ppt).
 
