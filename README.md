@@ -67,7 +67,8 @@ Options:
 		Number of cores for parallelization [default = 1]
 
 	-h, --help
-		Show this help message and exit```
+		Show this help message and exit
+		```
 
 
 
