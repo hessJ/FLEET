@@ -19,8 +19,8 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 ## Display help commands/options:
 
     Rscript FLEET.R -h
-    
-  ```  ==========================================================
+  ```  
+  ==========================================================
   *
   * Functional LD-clump EnrichmEnt Test (FLEET)
   *
