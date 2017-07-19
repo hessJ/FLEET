@@ -19,6 +19,52 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 ## Display help commands/options:
 
     Rscript FLEET.R -h
+    
+    ==========================================================
+  *
+  * Functional LD-clump EnrichmEnt Test (FLEET)
+  *
+  * Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
+  *
+  * SUNY Upstate Medical University, PsychGENe Lab
+  *
+  * Contact: hessjo@upstate.edu
+  *
+  * GNU GENERAL PUBLIC LICENSE v3
+  ===========================================================
+Usage: FLEET.R [options]
+
+
+Options:
+	-g CHARACTER, --gwas=CHARACTER
+		Path to GWAS summary statistics
+
+	-o CHARACTER, --out=CHARACTER
+		output file name [default = out.txt]
+
+	-r2 CHARACTER, --r2=CHARACTER
+		output file name [default = out.txt]
+
+	-ldw INTEGER, --ld-window=INTEGER
+		Size of window (kilobases) for calculating linkage disequilibrium [default = 1000]
+
+	-s CHARACTER, --snp-field=CHARACTER
+		SNP column header in GWAS file
+
+	-c CHARACTER, --clump-field=CHARACTER
+		P-value column header in GWAS file
+
+	-p DOUBLE, --permStartThreshold=DOUBLE
+		Minimum P-value from enrichment test to initiate permutation analysis [default = 0.005]
+
+	-n INTEGER, --nPerms=INTEGER
+		Number of permutations to perform [default = 1000]
+
+	-t INTEGER, --threads=INTEGER
+		Number of cores for parallelization [default = 1]
+
+	-h, --help
+		Show this help message and exit
 
 
 #### GNU GENERAL PUBLIC LICENSE v3
