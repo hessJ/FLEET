@@ -70,7 +70,9 @@ Options:
 		Show this help message and exit```
 
 
-#### GNU GENERAL PUBLIC LICENSE v3
+
+
+## GNU GENERAL PUBLIC LICENSE v3
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
