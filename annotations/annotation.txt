@@ -1,0 +1,18 @@
+SET	NAME
+Gene regions	CODING
+Gene regions	INTRON
+Gene regions	FIVEUTR
+Gene regions	THREEUTR
+Gene regions	PROMOTER
+Gene regions	SPLICESITE
+Pathways	PANTHER
+Pathways	CC
+Pathways	BP
+Pathways	MF
+DHS	DHS
+3D-CCC	HIC
+Chromatin modifications	HISTONE
+MICRORNA	MICRORNA
+TF binding sites	TFBS
+RBP binding sites	RBP
+Enhancers	FANTOM
