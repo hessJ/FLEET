@@ -24,26 +24,26 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
   
   ```  
   ==========================================================
-  *
-  * Functional LD-clump EnrichmEnt Test (FLEET)
-  *
-  * Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
-  *
-  * SUNY Upstate Medical University, PsychGENe Lab
-  *
-  * Contact: hessjo@upstate.edu
-  *
-  * GNU GENERAL PUBLIC LICENSE v3
-  ===========================================================
+*
+* Functional LD-clump EnrichmEnt Test (FLEET)
+*
+* Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
+*
+* SUNY Upstate Medical University, PsychGENe Lab
+*
+* Contact: hessjo@upstate.edu
+*
+* GNU GENERAL PUBLIC LICENSE v3
+===========================================================
 Usage: FLEET.R [options]
 
 
 Options:
 	-g CHARACTER, --gwas=CHARACTER
-		Path to GWAS summary statistics
+		Path to GWAS summary statistics. Column headers are required. Allowed delim = sep, tab, or comma
 
 	-o CHARACTER, --out=CHARACTER
-		output file name [default = out.txt]
+		output file name [default = fleetOut]
 
 	-r2 DOUBLE, --r2=DOUBLE
 		R-squared threshold for linkage disequilibrium calculations [default = 0.2]
@@ -65,6 +65,30 @@ Options:
 
 	-t INTEGER, --threads=INTEGER
 		Number of cores for parallelization [default = 1]
+
+	-l CHARACTER, --label-annotations=CHARACTER
+		Path to annotation table [default = annotations/annotation.txt]
+
+	-d CHARACTER, --rd-annots=CHARACTER
+		Path to .Rdata annotations [default = annotations/]
+
+	-af DOUBLE, --annot-cnt=DOUBLE
+		Minimum annotation count observed across LD-clumps [default = 10]
+
+	-fpr LOGICAL, --fleet-prune-ref=LOGICAL
+		Initiate LD-pruning step of 1KG reference data. Only needs to be run once. [default = TRUE]
+
+	-fc LOGICAL, --fleet-clump=LOGICAL
+		Initiate LD-clumping of GWAS summary statistics [default = TRUE]
+
+	-fa LOGICAL, --fleet-annotate=LOGICAL
+		Annotate LD-clumps with bedtools [default = TRUE]
+
+	-fe LOGICAL, --fleet-enrichment=LOGICAL
+		Perform enrichment analysis with weighted linear models [default = TRUE]
+
+	-fp LOGICAL, --fleet-permutation=LOGICAL
+		Perform enrichment analysis with permutation (bootstrapping variants) [default = TRUE]
 
 	-h, --help
 		Show this help message and exit
