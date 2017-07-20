@@ -89,7 +89,4 @@ Options:
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-Made on a 
-	MacBook Pro Retina
-	2.5 GHz Intel Core i7
-	16 GB 1600 MHz DDR3
+Made on a MacBook Pro Retina, 2.5 GHz Intel Core i7, 16 GB 1600 MHz DDR3
