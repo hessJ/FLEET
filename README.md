@@ -29,7 +29,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 *
 * Functional LD-clump EnrichmEnt Test (FLEET)
 *
-* Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
+* (c) 2017, Jonathan L. Hess, PhD and Stephen J. Glatt, PhD
 *
 * SUNY Upstate Medical University, PsychGENe Lab
 *
