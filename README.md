@@ -29,7 +29,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 *
 * Functional LD-interval EnrichmEnt Test (FLEET)
 *
-* (c) 2017, Jonathan L. Hess, PhD and Stephen J. Glatt, PhD
+* Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
 *
 * SUNY Upstate Medical University, PsychGENe Lab
 *
@@ -37,60 +37,64 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 *
 * GNU GENERAL PUBLIC LICENSE v3
 ===========================================================
-Usage: FLEET.R [options]
+
+Start time: 2017-07-25 18:55:04
+
+Location of fleet: /Users/jonathanhess/Documents/FLEET/fleet.R
+Usage: /Users/jonathanhess/Documents/FLEET/fleet.R [options]
 
 
 Options:
-	-g CHARACTER, --gwas=CHARACTER
+	-G CHARACTER, --gwas=CHARACTER
 		Path to GWAS summary statistics. Column headers are required. Allowed delim = sep, tab, or comma
 
-	-o CHARACTER, --out=CHARACTER
+	-O CHARACTER, --out=CHARACTER
 		output file name [default = fleetOut]
 
-	-r2 DOUBLE, --r2=DOUBLE
-		R-squared threshold for linkage disequilibrium calculations [default = 0.2]
+	-R DOUBLE, --r2=DOUBLE
+		R-squared threshold for linkage disequilibrium calculations [default = 0.6]
 
-	-ldw INTEGER, --ld-window=INTEGER
+	-W INTEGER, --ld-window=INTEGER
 		Size of window (kilobases) for calculating linkage disequilibrium [default = 1000]
 
-	-s CHARACTER, --snp-field=CHARACTER
+	-S CHARACTER, --snp-field=CHARACTER
 		SNP column header in GWAS file
 
-	-c CHARACTER, --clump-field=CHARACTER
+	-P CHARACTER, --pcol=CHARACTER
 		P-value column header in GWAS file
 
-	-p DOUBLE, --permStartThreshold=DOUBLE
-		Minimum P-value from enrichment test to initiate permutation analysis [default = 0.005]
-
-	-n INTEGER, --nPerms=INTEGER
+	-N INTEGER, --nPerms=INTEGER
 		Number of permutations to perform [default = 1000]
 
-	-t INTEGER, --threads=INTEGER
-		Number of cores for parallelization [default = 1]
+	-T INTEGER, --threads=INTEGER
+		Number of cores for parallel operations [default = 1]
 
-	-l CHARACTER, --label-annotations=CHARACTER
-		Path to annotation table [default = annotations/annotation.txt]
+	-L CHARACTER, --label-annotations=CHARACTER
+		Path to annotation table [default = /Users/jonathanhess/Documents/FLEET/annotations/annotation.txt]
 
-	-d CHARACTER, --rd-annots=CHARACTER
-		Path to .Rdata annotations [default = annotations/]
+	-D CHARACTER, --rd-annots=CHARACTER
+		Path to .Rdata annotations [default = /Users/jonathanhess/Documents/FLEET/annotations/]
 
-	-af DOUBLE, --annot-cnt=DOUBLE
+	-F DOUBLE, --annot-cnt=DOUBLE
 		Minimum annotation count observed across LD-clumps [default = 10]
 
-	-fpr LOGICAL, --fleet-prune-ref=LOGICAL
+	-M LOGICAL, --fleet-prune-ref=LOGICAL
 		Initiate LD-pruning step of 1KG reference data. Only needs to be run once. [default = TRUE]
 
-	-fc LOGICAL, --fleet-clump=LOGICAL
-		Initiate LD-clumping of GWAS summary statistics [default = TRUE]
-
-	-fa LOGICAL, --fleet-annotate=LOGICAL
+	-A LOGICAL, --fleet-annotate=LOGICAL
 		Annotate LD-clumps with bedtools [default = TRUE]
 
-	-fe LOGICAL, --fleet-enrichment=LOGICAL
+	-E LOGICAL, --fleet-enrichment=LOGICAL
 		Perform enrichment analysis with weighted linear models [default = TRUE]
 
-	-fp LOGICAL, --fleet-permutation=LOGICAL
-		Perform enrichment analysis with permutation (bootstrapping variants) [default = TRUE]
+	--fleet-permutation=LOGICAL
+		Perform enrichment analysis with permutation (randomizing annotations) [default = TRUE]
+
+	--fast-permutation=LOGICAL
+		Perform enrichment analysis with permutation (randomizing annotations) [default = TRUE]
+
+	--slow-permutation=LOGICAL
+		Perform enrichment analysis with permutation (bootstrapping variants) [default = FALSE]
 
 	-h, --help
 		Show this help message and exit
