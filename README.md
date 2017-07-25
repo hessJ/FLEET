@@ -1,5 +1,5 @@
 # FLEET
-Functional LD-clump EnrichmEnt Test (active development, i.e., easy to break)
+Functional LD-interval EnrichmEnt Test (active development, i.e., easy to break)
 
 This tool is used for biological interpretation of GWAS signals for polygenic phenotypes. 
 
@@ -27,7 +27,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
   ```  
   ==========================================================
 *
-* Functional LD-clump EnrichmEnt Test (FLEET)
+* Functional LD-interval EnrichmEnt Test (FLEET)
 *
 * (c) 2017, Jonathan L. Hess, PhD and Stephen J. Glatt, PhD
 *
