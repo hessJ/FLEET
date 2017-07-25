@@ -22,7 +22,7 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
     	or
     FLEET.R -h
   
-  Will print this: 
+  Will print something like this: 
   
   ```  
   ==========================================================
