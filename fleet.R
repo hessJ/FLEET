@@ -1,780 +1,998 @@
-
-
-### Author: Jonathan L. Hess (2017)
-### Affiliation: SUNY Upstate Medical University, Dept. of Psychiatry & Behavioral Sciences
-### Contact: hessjo@upstate.edu
-
-### R version 3.3.0 (2016-05-03, Supposedly Educational)
-### Platform: x86_64-w64-mingw32
-
-
-path_to_fleet = "~/Path/to/fleet.R"
-
-path_to_gwas = "~/Path/to/gwas.txt"
-
-
-# Set working directory where fleet.R is located
-setwd(paste(path_to_fleet))
-
-
-## Set LD-clumping parameters for Plink
-
-r2 = 0.1 ## minimum r2 value for a SNP for clumping
-ld_window = 1000 ## minimum distance between markers for clumping
-snp_field = "snpid" ## column name for SNPs
-clump_field = "p" ## Column name for p-value3
-
-## Set a p-value of enrichment (from weighted regression) to initiate permutations:
-
-permStartThreshold = 5e-05
-
-
-## Multithreaded options:
-n_cores = 2 ## User specified option
-
-## Check for multi-threaded option:
-if(is.null(n_cores) == TRUE){n_cores = 1} else {n_cores = n_cores}
-
-###
-
-dir.create("clumped")
-dir.create("pruned")
-dir.create("summary_stats")
-dir.create("plots")
-
-
-time_stamp = format(Sys.time(), "%a-%b-%d-%Y")
+#!/usr/bin/env Rscript
 
 
 # Import packages
+suppressMessages(library(optparse))
+suppressMessages(require(argparse))
 
-library(plyr)
-library(data.table)
-library(GenomicRanges)
-require(ggplot2)
-require(gridExtra)
-require(ggrepel)
-require(foreach)
-require(doParallel)
-require(xtable)
+## Auto-detect the directory name for fleet.R
+initial.options <- commandArgs(trailingOnly = FALSE)
+file.arg.name <- "--file="
+script.name <- sub(file.arg.name, "", initial.options[grep(file.arg.name, initial.options)])
+script.basename <- dirname(script.name)
+other.name <- paste(sep="/", script.basename, "fleet.R")
 
+# create log file
+srcPath = dirname(script.name)
+#log_con <- file(paste(srcPath,"fleet.log",sep=""),open="a")
 
+# set masthead
 
-# positional map of SNPs in hg19
+masthead = as.character("
+==========================================================
+*
+* Functional LD-interval EnrichmEnt Test (FLEET)
+*
+* Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
+*
+* SUNY Upstate Medical University, PsychGENe Lab
+*
+* Contact: hessjo@upstate.edu
+*
+* https://github.com/hessJ/FLEET
+*
+* GNU GENERAL PUBLIC LICENSE v3
+===========================================================\n")
 
-snp137 = readRDS("g1000_CEU_bimToGranges.Rdata")
-snp137 = snp137[!names(snp137) %in% "."]
-snpids = as.character(names(snp137))
-dup.names = snpids[duplicated(snpids)]
-snp137 = snp137[!names(snp137) %in% dup.names]
-snp137_df = as.data.frame(snp137)
-
-# Pull out SNPs in the MHCx region
-mhc = snp137_df[snp137_df$seqnames %in% "chr6" & snp137_df$start >= 24e6 & snp137_df$end <= 34e6, ]
-
-
-## Path to 1000G files 
-ref_data = list.files(path = path_to_fleet, full.names = TRUE, pattern= glob2rx("CEU*1kg_phase1*bed"))
-ref_data = gsub(".bed", "", ref_data)
-ref_data
-
-### Path to GWAS file
-gwas = paste(path_to_gwas, sep = "")
-
-## Read GWAS file and extract genome-wide significant markers
-read.gwas = fread(gwas, header = T)
-read.gwas = as.data.frame(read.gwas)
-sig.gwas = read.gwas[read.gwas[,colnames(read.gwas) %in% clump_field] < 5e-08, ]
+#cat(masthead, file = log_con)
+cat(masthead) # display masthead 
 
 
-### threshold for declaring a SNP genome-wide significant based on its -log10(P)
-gwas.sig.threshold = -log10(5e-08)
+# ========================================================================
+started = Sys.time()
+cat("\n")
+cat(paste("Start time:", started))
+cat("\n")
+
+cat("\nLocation of fleet:",script.name,"\n")
+
+# create parser object
+parser <- ArgumentParser()
+
+option_list = list(
+  make_option(c("-G", "--gwas"), type="character", default="", 
+              help="Path to GWAS summary statistics. Column headers are required. Allowed delim = sep, tab, or comma", metavar="character"),
+  
+  make_option(c("-O", "--out"), type="character", default="fleetOut", 
+              help="output file name [default = %default]", metavar="character"),
+  
+  make_option(c("-R", "--r2"), type="double", default=0.6, 
+              help="R-squared threshold for linkage disequilibrium calculations [default = %default]", metavar="double"),
+  
+  make_option(c("-W", "--ld-window"), type="integer", default=1000, 
+              help="Size of window (kilobases) for calculating linkage disequilibrium [default = %default]", metavar="integer"),
+  
+  make_option(c("-S", "--snp-field"), type="character", default="", 
+              help="SNP column header in GWAS file", metavar="character"),
+  
+  make_option(c("-P", "--pcol"), type="character", default="", 
+              help="P-value column header in GWAS file", metavar="character"),
+
+  make_option(c("--robust"), type="logical", default=TRUE,
+              help="Computing robust standard errors using White method (via vcovHC function in sandwich pkg) [default = %default]", metavar="double"),
+  
+  make_option(c("-N", "--nPerms"), type="integer", default=1000, 
+              help="Number of permutations to perform [default = %default]", metavar="integer"),
+  
+  make_option(c("-T", "--threads"), type="integer", default=1, 
+              help="Number of cores for parallel operations [default = %default]", metavar="integer"),
+  
+  make_option(c("-L", "--label-annotations"), type="character", default=paste(srcPath,"/annotations/annotation.txt",sep=""), 
+              help="Path to annotation table [default = %default]", metavar="character"),
+  
+  make_option(c("-D", "--rd-annots"), type="character", default=paste(srcPath,"/annotations/",sep=""),
+              help="Path to .Rdata annotations [default = %default]", metavar="character"),
+  
+  make_option(c("-F", "--annot-cnt"), type="double", default=10, 
+              help="Minimum annotation count observed across LD-clumps [default = %default]", metavar="double"),
+  
+  ## Run options....
+  
+  make_option(c("-M", "--fleet-prune-ref"), type="logical", default = TRUE, 
+              help="Initiate LD-pruning step of 1KG reference data. Only needs to be run once. [default = %default]", metavar="logical"),
+  
+  make_option(c("-A", "--fleet-annotate"), type="logical", default=TRUE, 
+              help="Annotate LD-clumps with bedtools [default = %default]", metavar="logical"),
+  
+  make_option(c("-E", "--fleet-enrichment"), type="logical", default=TRUE, 
+              help="Perform enrichment analysis with weighted linear models [default = %default]", metavar="logical"),
+  
+  make_option("--fleet-permutation", type="logical", default=TRUE, 
+              help="Perform enrichment analysis with permutation (randomizing annotations) [default = %default]", metavar="logical"),
+  
+  make_option("--fast-permutation", type="logical", default=FALSE, 
+              help="Simple permutation analysis [default = %default]", metavar="logical"),
+  
+  make_option("--robust-permutation", type="logical", default=FALSE, 
+              help="Permutation analysis that will sample variants from the MAF bin of target SNPs [default = %default]", metavar="logical"),
+  
+  make_option("--pthres", type="character", default="",
+              help="Table with P-value threshold(s) for SNP bins [default P-values < 5e-08, 1e-07, and 1e-06]", metavar="character"),
+  
+  make_option("--plots", type="logical", default=FALSE,
+              help="Turning this on will produce multiple plots to display summary statistics [default = %default]", metavar="logical")
+  
+); 
+
+opt_parser = OptionParser(option_list=option_list);
+opt = parse_args(opt_parser);
+
+# handling empty arguments
+if (opt$gwas == ""){
+  print_help(opt_parser)
+  stop("At least one argument must be supplied (input file).\n", call.=FALSE)
+}
+
+if (opt$`snp-field` == ""){
+  print_help(opt_parser)
+  stop("At least one argument must be supplied (input file).\n", call.=FALSE)
+}
+
+if (opt$pcol == ""){
+  print_help(opt_parser)
+  stop("At least one argument must be supplied (input file).\n", call.=FALSE)
+}
+# ========================================================================
+
+flags_in_use = as.data.frame(t(as.data.frame(opt)))
+rownames(flags_in_use) = paste("--", rownames(flags_in_use), sep = "")
+flags_in_use$id = rownames(flags_in_use)
+flags_in_use = flags_in_use[!flags_in_use$V1  == FALSE & !flags_in_use$V1 %in% "", ]
+
+flags_in_use$stdout = paste("    ", gsub("[.]", "-", rownames(flags_in_use)), flags_in_use$V1, "\n", sep = " ")
+
+cat("\nFlags in use:\n", flags_in_use$stdout)
+
+
+# //// Dependencies
+cat("\nPackages loading...\n")
+suppressWarnings(suppressMessages(library(plyr)))
+suppressWarnings(suppressMessages(library(data.table)))
+suppressWarnings(suppressMessages(library(GenomicRanges)))
+suppressWarnings(suppressMessages(library(ggplot2)))
+suppressWarnings(suppressMessages(library(ggrepel)))
+suppressWarnings(suppressMessages(library(foreach)))
+suppressWarnings(suppressMessages(library(doParallel)))
+suppressWarnings(suppressMessages(library(lmtest)))
+suppressWarnings(suppressMessages(library(sandwich)))
+suppressWarnings(suppressMessages(library(doParallel)))
+suppressWarnings(suppressMessages(library(broom)))
+cat("Successfully loaded packages!\n")
 
 
 
+# //// Functions 
 
-##################### Module A.  Pruning 1000G CEU data for variants in high LD 
-##########################################################################################################################
-##########################################################################################################################
-##########################################################################################################################
+# ========================================================================
+# Import SNP coordinates from 1KG reference:
+
+readSNPcoords  = function(){
+  cat("Reading SNP coordinates from 1KG bim files")
+  read_in = list.files(path = paste(srcPath,'/qc/ref/',sep=""), full.names = T, pattern = 'bim')
+  read_in = lapply(read_in, function(x) fread(x, header = FALSE, showProgress=FALSE))
+  read_df = rbindlist(read_in)
+  dups = as.data.frame(read_df[duplicated(read_df$V2), ])
+  dups = unique(dups$V2)
+  write.table(dups, file = paste(srcPath,'/qc/ref/duplicatevars.txt',sep=""), quote = F, row.names = F, col.names = F)
+  colnames(read_df) = c("seqnames", "SNP", "empty", "start", "A1", "A2")
+  read_df = as.data.frame(read_df)
+  read_df$seqnames = paste("chr", read_df$seqnames, sep = "")
+  read_df = read_df[!read_df$SNP %in% dups, ]
+  snp137_df <<- read_df
+}
+
+
+# pull out snps in the xMHC region
+xMHCregion = function(){
+  mhc =  snp137_df[snp137_df$seqnames %in% "chr6" & snp137_df$start >= 24e6 & snp137_df$start <= 35e6, ]
+  snp137_df_nomhc <<- snp137_df[!snp137_df$SNP %in% mhc$SNP, ]
+  mhc <<- mhc
+}
+
+# Set annotations for FLEET
+readAnnots = function(){
+  read_annots = read.table(opt$`label-annotations`, header = T, sep = "\t")
+  annot.cat <<- read_annots
+  
+  # path to annotation .Rdata files
+  rdata_files = list.files(path = opt$`rd-annots`, full.names = T, pattern = ".Rdata")
+  
+  if(nrow(read_annots) != length(rdata_files)){stop("Number of .Rdata files does not match table with annotation labels!")}
+}
+
+
+
+# read GWAS file:
+fleetReadGWAS = function(){
+  
+  # simple delim detection
+  readlines = readLines(opt$gwas, n = 1)
+  tab = strsplit(readlines, "\t")[[1]]
+  space = strsplit(readlines, "[ ]")[[1]]
+  comma = strsplit(readlines, "[,]")[[1]]
+  delim_size = lapply(list(tab, space, comma), length)
+  
+  # infer delim:
+  infer = which(unlist(delim_size) == max(unlist(delim_size)))
+  if(infer == 1){cat("\nGuessing that GWAS file is tab-delimited\n"); read.gwas = fread(opt$gwas, header = T, sep = "\t", showProgress=FALSE)}
+  if(infer == 2){cat("\nGuessing that GWAS file is space-delimited\n"); read.gwas = fread(opt$gwas, header = T, sep = " ", showProgress=FALSE)}
+  if(infer == 3){cat("\nGuessing that GWAS file is comma-delimited\n"); read.gwas = fread(opt$gwas, header = T, sep = ",", showProgress=FALSE)}
+  read.gwas = as.data.frame(read.gwas)
+  
+  cat("Writing SNP list...\n")
+  snp.list = read.gwas[,colnames(read.gwas) %in% opt$`snp-field`]
+  # snp.list = snp.list[snp.list %in% snp137_df$SNP]
+  snp.list = data.table(SNP = snp.list)
+  fwrite(snp.list, nThread = opt$threads, file = paste(srcPath, "/qc/pruned/gwas.snp.list", sep = ""), quote = F, row.names = F, col.names = F)
+  
+  sumstats <<- read.gwas
+  
+}
 
 
 ### Prune 1KG reference 
-
-for( i in 1:length(ref_data)){
-  cat("\r Pruning reference data for variants in high LD (short range)",i)
-  prune = paste("plink --bfile ", ref_data[[i]], " --maf .05 --indep 100 5 2 --out ",path_to_fleet,"/pruned/PRUNED_",basename(ref_data[[i]]), sep = "")
-  system(prune,show.output.on.console = FALSE)
-}
-prune.in = list.files(path = paste(path_to_fleet,"/pruned/",sep=""), pattern = "prune.in", full.names = TRUE)
-path = path[grepl("1kg_phase1_", path)]
-if(length(prune.in) != 22){stop("Unexpected number of LD-pruned reference data files detected! Please check ~/pruned/ directory for errors.")}
-prune.in = lapply(prune.in, function(x) read.table(x, header = F))
-sum(unlist(lapply(prune.in, nrow))) ## total number of SNPs retained after high-LD pruning step
-
-
-prune.in = as.data.frame(do.call(rbind, prune.in))
-prune.in.plus = c(as.character(prune.in[,1]), sig.gwas[,colnames(sig.gwas) %in% clump_field])
-write.table(prune.in.plus, file = paste(path_to_fleet,"/pruned/PRUNE.IN",sep = ""), quote = F, row.names = F, col.names = F)
-
-
-
-
-##################### Module B.  Clumping GWAS summary statistics file using LD-pruned 1000G data
-##########################################################################################################################
-##########################################################################################################################
-##########################################################################################################################
-
-
-
-## Clump summary statistics for GWAS provided in the list 'gwas' (integrates genome-wide significant markers that were dropped from LD-prune)
-for( i in 1:length(gwas)){
+refPrune = function(){
   
+  ref_data = list.files(path = paste(srcPath,'/qc/ref/',sep=""), full.names = T, pattern = 'bim')
+  ref_data = gsub(".bim", "", ref_data)
   
-  ## Enable multi-threading for clumping GWAS
-  cl = makeCluster(n_cores)
-  registerDoParallel(cl)
-  
-  
-  print(paste("Clumping GWAS results:", basename(gwas[[i]])))
-  
-  
-  for( j in 1:length(ref_data)){
+  for( i in 1:length(ref_data)){
+    indep.cmd = paste('--indep-pairwise 100 1 0.1')
+    cat("\nPruning variants to approximate linkage equilibrium ( Plink command:",indep.cmd,"): ",i)
+    prune = paste("plink --bfile ", ref_data[[i]], " --maf .05 --geno .05 --mind .05 --hwe 1e-06 --freq --extract ", srcPath,"/qc/pruned/gwas.snp.list ",indep.cmd," --out ", srcPath,"/qc/pruned/PRUNED_",basename(ref_data[[i]]), sep = "")
     
-    cmd = paste("plink --bfile ", ref_data[[j]]," --exclude ",path_to_fleet,"/dupvars.txt --freq --clump ", gwas[[i]], " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", r2," --clump-kb ",ld_window," --extract ",path_to_fleet,"/pruned/PRUNE.IN --clump-snp-field ",snp_field," --clump-field ",clump_field," --out F:/ref_data/g1000/qc/clumped/CLUMP_",basename(gwas[[i]]),"_",j, sep = "")
-    
-    system(cmd,show.output.on.console = FALSE)
+    system(prune, ignore.stdout = TRUE)
     
   }
-  stopCluster(cl)
-  registerDoSEQ()
-  
   
 }
 
 
-
-
-
-##################### Module C.  Annotating hg19 common variants with functional/regulatory elements
-##########################################################################################################################
-##########################################################################################################################
-##########################################################################################################################
-
-
-
-
-### Path to functional regulatory annotations
-paths = list.files(path = path_to_fleet, full.names = T, pattern = "CC|MF|PANTHER|DHS|CODING|PROMOTER|SPLICESITE|UTR|FANTOM|INTRON|HISTONE|RBP|TFBS")
-paths = paths[grepl(".Rdata", paths)]
-
-
-## Genomic annotations by position, type, and tissue of origin
-names(paths) = gsub(".Rdata", "", basename(paths))
-
-annot.cat = list(c("CODING", "INTRON", "FIVEUTR", "THREEUTR", "PROMOTER","SPLICESITE"), c("PANTHER", "CC","MF"),
-                 "DHS", c("HISTONE"), c("TFBS"), c("RBP"), c("FANTOM"))
-
-
-## Overlap annotations onto SNP positions 
-
-annot.list = list()
-for( i in 1:length(paths)){
+## Prune GWAS file
+fleetPrune = function() { 
   
-  cat("\r Mapping genomic annotations to SNPs",i)
+  prune.in = list.files(path = paste(srcPath,"/qc/pruned/",sep=""), pattern = "prune.in", full.names = TRUE)
+  prune.in = lapply(prune.in, function(x) read.table(x, header = F, stringsAsFactors = FALSE))
+  total_indep = sum(unlist(lapply(prune.in, nrow)))
+  cat("\nNumber of variants retained in reference panel after LD-pruning:", total_indep, "\n")
   
-  annot.gr = readRDS(paths[[i]])
+  prune.in = as.data.frame(do.call(rbind, prune.in))
+  prune.in = prune.in[!duplicated(prune.in$V1), ]
   
-  ## For splice junctions, add a 20 base window 
-  if(names(paths)[[i]] == "SPLICESITE"){
-    
-    start(annot.gr) = start(annot.gr) - 20
-    end(annot.gr) = end(annot.gr) + 20
-    
-  }
+  read.gwas = sumstats
+  sig.gwas = read.gwas[read.gwas[,colnames(read.gwas) %in% opt$pcol] < 5e-08, ]
   
+  prune.in.plus = c(as.character(prune.in), sig.gwas[,colnames(sig.gwas) %in% opt$`snp-field`])
+  prune.in.plus = prune.in.plus[!duplicated(prune.in.plus)]
   
-  ## For cell/tissue enhancers add a 500 base window 
-  if(names(paths)[[i]] == "FANTOM"){
-    
-    start(annot.gr) = start(annot.gr) - 500
-    end(annot.gr) = end(annot.gr) + 500
-    
-  }
+  write.table(prune.in.plus, file = paste(srcPath,"/qc/pruned/",opt$out, "_PRUNE.IN",sep=""), quote = F, row.names = F, col.names = F)
   
-  ## For histone/DHS, subset brain and immune cell/tissue types
-  if(names(paths)[[i]] == "HISTONE" | names(paths)[[i]] == "DHS"){
-    # annot.gr = annot.gr[grepl(brain.tissue, elementMetadata(annot.gr)$tissue)]
-    
-    cell.grab.histone = c("brain|lobe|cortex|astro|cerebellum|pyramidal|lymph|B cell|frontal|hippo|cingulate|gyrus|neuro|pericyte|neutro|monocyte|dendritic|helper|lymphocyte|spleen|thymus|killer")
-    
-    annot.gr = annot.gr[grepl(cell.grab.histone, annot.gr$tissue),]
-    annot.gr = annot.gr[!grepl("renal|liver|kidney", annot.gr$tissue), ]
-    
-    elementMetadata(annot.gr)$id = paste(elementMetadata(annot.gr)$id,"_", elementMetadata(annot.gr)$tissue, sep = "" )}
-  
-  overlaps = findOverlaps(snp137, annot.gr) ## SNPs overlapping annotations
-  
-  snp.hits = names(snp137)[queryHits(overlaps)]
-  
-  features = elementMetadata(annot.gr)$id[subjectHits(overlaps)]
-  
-  
-  snp.comb = data.table(SNP = as.character(snp.hits), ID =  gsub("-human", "", as.character(features)))
-  
-  annot.list[[i]] = snp.comb
+  names(read.gwas)[names(read.gwas) %in% c(opt$`snp-field`, opt$pcol)] = c("SNP", "P")
+  sumstats <<- read.gwas
   
 }
 
 
+## Clump GWAS data 
 
-################## 
+# fleetClump = function() {
+#   
+#   
+#   ref_data = list.files(path = paste(srcPath,'/qc/ref/',sep=""), full.names = T, pattern = 'bim')
+#   ref_data = gsub(".bim", "", ref_data)
+#   
+#   
+#   ## Enable multi-threading for clumping GWAS
+#   cat("\nUsing", opt$threads, "threads for parallel processes\n")
+#   
+#   # cl = makeCluster(opt$threads)
+#   # registerDoParallel(cl)
+#   
+#   cat("\nEnrichment analysis of trait:", basename(opt$gwas), "\n")
+#   
+#   
+#   cat("\nClumping GWAS results\n")
+#   
+#   # foreach( j = 1:length(ref_data), .packages=c("optparse", "argparse")) %dopar% {
+#   
+#   cmd = list()
+#   for(j in 1:length(ref_data)){
+#     
+#     # ensure that spaces are escaped in GWAS file path
+#     gwas_file = gsub(" ", "\\ ", opt$gwas, fixed = T)
+#     
+#     cmd[[j]] = paste("plink --bfile ", ref_data[[j]]," --exclude ", srcPath,"/qc/ref/duplicatevars.txt --freq --clump ", gwas_file, " --clump-p1 1.0 --clump-p2 1.0 --clump-r2 ", opt$r2," --clump-kb ",opt$`ld-window`," --extract ",srcPath,"/qc/pruned/",opt$out,"_PRUNE.IN --clump-snp-field ", opt$`snp-field`," --clump-field ", opt$`clump-field`," --out ",srcPath,"/qc/clumped/CLUMP_",opt$out,"_",j, sep = "")
+#     
+#     
+#   }
+#   
+#   mclapply(cmd, function(x) system(x, ignore.stdout = TRUE), mc.cores  = opt$threads)
+#   gc()
+#   
+#   # stopCluster(cl)
+#   # registerDoSEQ()
+#   
+#   cat("\nCompleted clumping!\n")
+#   
+# }
 
 
-
-
-
-
-
-##################### Module D.  Genome-wide enrichment test for functional annotations across LD-clumped loci  
-##########################################################################################################################
-##########################################################################################################################
-##########################################################################################################################
-
-
-ld.df.list <- list()
-glm_combine = list()
-for( i in 1:length(gwas)){
+## Combine LD-clumps with summary statistics
+fleetLD = function() {
   
-  clumped = list.files(path = "F:/ref_data/g1000/qc/clumped/", full.names = T, pattern = glob2rx("CLUMP_*.clumped"))
-  clumped = clumped[grepl(basename(gwas[[i]]), clumped)]
   
+  # read 1KG reference data
+  ref_data = list.files(path = paste(srcPath,'/qc/ref/',sep=""), full.names = T, pattern = 'bim')
+  ref_data = gsub(".bim", "", ref_data)
+  ref_data
   
-  clumped.df = lapply(clumped, function(x) fread(x, header = T, stringsAsFactors = FALSE))
+  cat("\nReading in pruned variants\n")
+  # clumped = list.files(path = paste(srcPath,"/qc/clumped/",sep=""), full.names = T, pattern = glob2rx("CLUMP*clumped"))
+  clumped = list.files(path = paste(srcPath,"/qc/pruned/",sep=""), full.names = T, pattern = glob2rx("*prune.in"))
+  # clumped = clumped[grepl(opt$out, clumped)]
+  
+ 
+  
+  cat("Munging pruned variants\n")
+  
+  # Read in clumps
+  # clumped.df = lapply(clumped, function(x) fread(x, header = T, stringsAsFactors = FALSE))
+  clumped.df = lapply(clumped, function(x) fread(x, header = F, stringsAsFactors = FALSE, showProgress=FALSE))
   sum(unlist(lapply(clumped.df, nrow)))
   clumped.df = rbindlist(clumped.df)
   
-  clumped.df$SP2[clumped.df$SP2 %in% "NONE"] <- clumped.df$SNP[clumped.df$SP2 %in% "NONE"]
+  # read GWAS results
+  gwasResults = sumstats
+  names(gwasResults)[names(gwasResults) %in% opt$`snp-field`] = "INDEX"
+  names(gwasResults)[names(gwasResults) %in% opt$pcol] = "P"
+  cset = as.data.frame(clumped.df)
+  colnames(cset) = "INDEX"
+  cset = as.data.frame(merge(setDT(cset), setDT(gwasResults), by ='INDEX'))
   
-  
-  snp_list = clumped.df$SP2
-  snp_list = sapply(snp_list, function(x) strsplit(x, ","))
-  names(snp_list) = clumped.df$SNP
-  
-  snp_friends = sapply(snp_list, function(x) length(x))
-  
-  rep_function = function(x,y) {
-    rep(x, y)
-  }
-  snp_reps = mapply(rep_function, x = names(snp_friends),y = snp_friends)
-  ld.df = data.frame(INDEX = unlist(snp_reps), SNP= unlist(snp_list))
-  split_char = strsplit(as.character(ld.df$SNP), "[(]")
-  ld.df$SNP = unlist(lapply(split_char, function(x) x[[1]]))
-  
-  
-  ## freqs in clump
-  
-  freqs = list.files(path = "F:/ref_data/g1000/qc/clumped", full.names = T, pattern = glob2rx("CLUMP_*.frq"))
-  freqs = freqs[grepl(basename(gwas[[i]]), freqs)]
-  
-  
-  freqs.df = lapply(freqs, function(x) fread(x, header = T))
+  # Remove rows containing no clumped markers
+  # clumped.df$SP2[clumped.df$SP2 %in% "NONE"] <- clumped.df$SNP[clumped.df$SP2 %in% "NONE"]
+  # 
+  # # Munge clumps
+  # snp_list = clumped.df$SP2
+  # snp_list = sapply(snp_list, function(x) strsplit(x, ","))
+  # names(snp_list) = clumped.df$SNP
+  # 
+  # snp_friends = sapply(snp_list, function(x) length(x))
+  # 
+  # rep_function = function(x,y) {
+  #   rep(x, y)
+  # }
+  # snp_reps = mapply(rep_function, x = names(snp_friends),y = snp_friends)
+  # ld.df = data.frame(INDEX = unlist(snp_reps), SNP= unlist(snp_list))
+  # split_char = strsplit(as.character(ld.df$SNP), "[(]")
+  # ld.df$SNP = unlist(lapply(split_char, function(x) x[[1]]))
+  # 
+  # cat("....Calculating MAF\n")
+  # 
+  # freqs = list.files(path = paste(srcPath,"/qc/clumped", sep = ""), full.names = T, pattern = glob2rx("CLUMP*frq"))
+  freqs = list.files(path = paste(srcPath,"/qc/pruned", sep = ""), full.names = T, pattern = glob2rx("*frq"))
+  # freqs = freqs[grepl(opt$out, freqs)]
+  # 
+  freqs.df = lapply(freqs, function(x) fread(x, header = T, showProgress=FALSE))
   sum(unlist(lapply(freqs.df, nrow)))
   freqs.df = rbindlist(freqs.df)
   cols = c("SNP", "MAF")
   freqs.df = freqs.df[,cols,with = FALSE]
-  
-  
-  
-  ### Calculate LD between index markers and surrounding markers:
-  write.table(clumped.df$SNP, file = "G:/PGC_Results/clumped/INDEX.snplist", quote = F, col.names = F)
-  
-  print(paste("Calculating LD for index markers"))
+  # 
+  # 
+  cat("....Calculating LD scores\n")
+  # 
+  # write.table(clumped.df$SNP, file = paste(srcPath,"/qc/clumped/INDEX.snplist",sep=""), quote = F, col.names = F)
+  fwrite(data.table(cset$INDEX), nThread = opt$threads, file = paste(srcPath,"/qc/clumped/INDEX.snplist",sep=""), quote = F, col.names = F, row.names = F)
+  # 
+  # print(paste("Calculating LD for index markers"))
+
   for( j in 1:length(ref_data)){
-    
-    # cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --exclude F:/ref_data/g1000/dupvars.txt --ld-snp-list G:/PGC_Results/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window-r2 0.6 --out G:/PGC_results/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
-    cmd = paste("G:/1KG/plink --bfile ", ref_data[[j]]," --ld-window 99999 --exclude F:/ref_data/g1000/dupvars.txt --ld-snp-list G:/PGC_Results/clumped/INDEX.snplist --ld-window-kb ", ld_window," --r2 --ld-window-r2 0.1 --out G:/PGC_results/clumped/LDINT_",basename(gwas[[i]]),"_",j, sep = "")
-    
+
+    cmd = paste("plink --bfile ", ref_data[[j]]," --ld-window 99999 --exclude ", srcPath,"/qc/ref/duplicatevars.txt --ld-snp-list ",srcPath,"/qc/clumped/INDEX.snplist --ld-window-kb ", opt$`ld-window`," --r2 --ld-window-r2 ", opt$r2, " --out ",srcPath,"/qc/clumped/LDINT_",opt$out,"_",j, sep = "")
+
     cmd = gsub("\n", "", cmd)
     cmd
-    
-    system(cmd, show.output.on.console = FALSE)
-    
+
+    system(cmd, ignore.stdout = TRUE)
+
   }
   
-  ld = list.files(path = "G:/PGC_Results/clumped", full.names = T, pattern = paste("LDINT_",basename(gwas[[i]]), sep = ""))
+  ld = list.files(path = paste(srcPath,"/qc/clumped",sep=""), full.names = T, pattern = paste("LDINT_",opt$out, sep = ""))
   ld = ld[!grepl(".log", ld)]
   
-  ld.int = lapply(ld, function(x) fread(x, header = T))
+  ld.int = lapply(ld, function(x) fread(x, header = T, showProgress=FALSE))
   ld.int = rbindlist(ld.int)
   ld.int = as.data.frame(ld.int)
   ld.int = ld.int[,colnames(ld.int) %in% c("SNP_A", "CHR_A", "BP_A", "SNP_B", "R2")]
   colnames(ld.int) = c("CHR","BP","INDEX","SNP","R2")
   
-  ### subset ld.df by SNPs in high ld (r>0.6) to index marker
-  # ld.df = ld.df[ld.df$SNP %in% ld.int$SNP, ]
   
-  ld.maf = merge(ld.df , freqs.df , by = "SNP")
-  
-  
+  # ld.int = merge(cset[,c("INDEX", "SNP")], ld.int , by = "INDEX")
+
+  ld.maf = merge(ld.int , freqs.df , by = "SNP")
+  # 
   maf.bin = aggregate(ld.maf$MAF, by=list(ld.maf$INDEX), function(x) sum(-log(x)))
   colnames(maf.bin) = c("INDEX", "MAF")
-  
-  ld.df = merge(ld.df, maf.bin, by = "INDEX")
+  # 
+  ld.df = merge(cset, maf.bin, by = "INDEX")
   ld.df = ld.df[!duplicated(ld.df), ]
   
-  names(clumped.df)[names(clumped.df) %in% "SNP"] = "INDEX"
-  
-  ## add P-value to LD interval
-  clumped.df = as.data.frame(clumped.df)
-  clumped.df = clumped.df[match(ld.df$INDEX, clumped.df$INDEX), ]
-  ld.df$P = clumped.df$P
-  
-  ## Remove MHC from LD intervals 
+  cat("....Removing xMHC from LD clumps\n")
   ld.df = ld.df[!ld.df$INDEX %in% rownames(mhc), ]
   ld.df$INDEX = as.factor(ld.df$INDEX)
   
-  
-  ## calculate number of LD friends
-  ld_friends = unlist(table(ld.df$INDEX))
+  # 
+  cat("....Finding LD friends for index variants\n")
+  ld_friends = unlist(table(ld.int$INDEX))
   ld_friends = as.data.frame(ld_friends)
   ld_friends = ld_friends[match(ld.df$INDEX, ld_friends$Var1), ]
   ld.df$LD_FRIENDS = ld_friends$Freq
   ld.df$LD_FRIENDS[is.na(ld.df$LD_FRIENDS)] = 0
   
-  ## calculate LD scores for index SNPs 
-  
+  cat("....Calculating LD scores for index variants\n")
+  # 
   ld.score = aggregate(ld.int$R2, by = list(ld.int$INDEX), sum)
   colnames(ld.score) = c("INDEX", "LDSCORE")
+  # ld.df$LOGP = -log10(ld.df$P)
+  # ld.df$P[ld.df$P < 1e-15] <- 1e-15
+  # ld.df$ZSCORE = qnorm(1-ld.df$P/2)
+  # ld.df = merge(ld.df, ld.score, by="INDEX")
   
-  ## association scores 
+  ld.df = merge(ld.df, ld.score, by= "INDEX")
   ld.df$LOGP = -log10(ld.df$P)
   ld.df$P[ld.df$P < 1e-15] <- 1e-15
   ld.df$ZSCORE = qnorm(1-ld.df$P/2)
-  ld.df = merge(ld.df, ld.score, by="INDEX")
   
-  ld.df.list[[i]] = ld.df
+  # 
+  fwrite(setDT(ld.df), file = paste(srcPath,"/out/",opt$out,".sumstats",sep=""),quote=F,row.names=F,sep="\t",showProgress = FALSE, nThread = opt$threads)
+  
+  gwasMunged <<- ld.df 
+  intervals <<- ld.int
+  
+  fwrite(setDT(ld.int), nThread = opt$threads , file = paste(srcPath,"/out/",opt$out,".intervals",sep=""),quote=F,row.names=F,sep="\t",showProgress = FALSE)
   
 }
 
-## FLEET enrichment analysis
 
+## FLEET annotation (via bedtools)
 
-start_clock = proc.time()
-
-for(n in 1:length(ld.df.list)){
+fleetAnnot = function(x) {
   
-  ld.df <- ld.df.list[[n]]
+  # order snp into bed
+  snp.bed = snp137_df[snp137_df$SNP %in% intervals$SNP, ]
+  match.order = c('seqnames', 'start', 'start', 'SNP')
+  snp.bed = snp.bed[,colnames(snp.bed) %in% match.order]
+  snp.bed = snp.bed[,match(match.order, colnames(snp.bed))]
+  snp.bed$start.1 = snp.bed$start + 1
+  snp.bed  = snp.bed[order(snp.bed$seqnames, snp.bed$start), ]
+  # snp.bed = data.frame(snp.bed, empty = NA, empty = "+")
+  write.table(snp.bed, file = paste(srcPath,"/annotations/bedtools/snp.bed",sep=""), quote = F, row.names = F, col.names = F, sep = "\t")
   
-  coef_trait = list()
-  glm_trait  = list()
+  # load annotations, run bedtools: 
+  rdataAnnots = list.files(path = paste(srcPath,"/annotations/", sep=  ""), full.names = T, pattern = '.Rdata')
+  rdataAnnots
   
-  for( a in 1:length(paths)){
+  for( a in 1:length(rdataAnnots)){
     
-    cat("\r    Loading annotations:",a,"...")
-
-    annot.gr = readRDS(paths[[a]])
+    cat("\nAnnotating variants with bedtools:",rdataAnnots[[a]],"...")
     
-    
-    # merge data table with ld.df stats
-    tmp = merge(data.table(ld.df[,c("SNP","INDEX")]), annot.gr, by = "SNP", all.x = T)
-    
-    tmp = as.data.frame(tmp)
-    tmp = tmp[,!colnames(tmp) %in% "SNP"]
-    tmp = tmp[!duplicated(tmp$INDEX), ]
-    tmp[is.na(tmp)] = 0 
-    
-    # merge index information
-    all_df = merge(data.table(ld.df[,!colnames(ld.df) %in% "SNP"]), tmp, by = "INDEX")
-    all_df = all_df[!duplicated(all_df)]
-    all_df = as.data.frame(all_df)
+    # Convert annotation file to bedtools format:
+    annot.gr = readRDS(rdataAnnots[[a]])
+    names(annot.gr) = NULL # ensure rownames are NULL (this can create problems if duplicates exist, which is highly likely)
+    annot.df = as.data.frame(annot.gr)
+    annot.bed = annot.df[,c("seqnames", "start", "end", "id")]
+    annot.bed = annot.bed[order(annot.bed$seqnames, annot.bed$start), ]
+    annot.bed = data.frame(annot.bed, empty = NA, empty = "+" )
     
     
-    new.tracks = sub("[[:punct:]]", "", colnames(all_df))
-    new.tracks = gsub("[-|,/.;:'() ]", "", colnames(all_df))
-    new.tracks = gsub("[+]", "_", new.tracks)
-    colnames(all_df) = new.tracks
+    # size of matrix
+    castMb = round( nrow(annot.bed) * ncol(annot.bed) * 8/1e6, 3)
+    nAnnots = length(unique(annot.bed$id))
     
-    # threshold for declaring genome-wide significace 
-    gwas.sig.threshold = -log10(5e-08) # threshold for calling INDEX marker genome-wide significant
-    
-    # grab unique track names (for looping)
-    tracks = colnames(all_df)[-c(1:7)]
-    names(all_df)[names(all_df) %in% tracks] = paste("ID_", tracks, sep = "")
-    tracks = paste("ID_", tracks, sep = "")
-    
-    q_plot = list()
-    c_list = list()
-    glm_list = list()
-    keep.track.names= list()
-    bounds_df = list()
-    
-    for(b in 1:length(tracks)){
+    if(nAnnots >= 500){ cat("\n   Annotation matrix is approximately",castMb, "Mb in size and contains",nAnnots,"terms. Writing into chunks to reduce memory strain...\n")
       
-      cat("\r Enrichment analysis in LD intervals (", names(paths)[[a]],")", b, "of", length(tracks))
+      unique.tracks = unique(annot.bed$id)
+      
+      chunkSize = ceiling(length(unique(annot.bed$id))/10)
+      
+      trackChunks = split(unique.tracks, ceiling(seq_along(unique.tracks)/ chunkSize ))
+      
+      
+      # memory efficient operation for large annotation files: 
+      for ( tc in 1:length(trackChunks)){
+        
+        write.table(annot.bed[annot.bed$id %in% trackChunks[[tc]], ], file = paste(srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),"_CHUNK_",tc,".bed",sep=""), quote= F, row.names = F, col.names = F, sep = "\t")
+    
+        # Run bedtools variant annotation:
+        cmd = paste("bedtools intersect -a ",srcPath,"/annotations/bedtools/snp.bed -b ",srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),"_CHUNK_",tc,".bed -wb > ",srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),"_CHUNK_",tc,"_",opt$out, ".txt" , sep = "")
+        system(cmd, ignore.stdout = FALSE)
+         }
+       } else { write.table(annot.bed, file = paste(srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),".bed",sep=""), quote= F, row.names = F, col.names = F, sep = "\t")
+        
+        # Run bedtools variant annotation:
+        cmd = paste("bedtools intersect -a ",srcPath,"/annotations/bedtools/snp.bed -b ",srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),".bed -wb > ",srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])), "_",opt$out, ".txt" , sep = "")
+        system(cmd, ignore.stdout = FALSE)
+        
+        }
+      
+    
+    
+    
+  }
+  
+}
+  
+  
+### Enrichment analysis
+fleetTest = function() {
+    
+    
+    search = ls()[grepl("gwasMunged", ls())]
+    
+    if(length(search) > 0) {ld.df <- gwasMunged} else{cat("\nReading summary statistics file...\n"); ld.df = as.data.frame(fread(paste(srcPath,"/out/",opt$out,".sumstats",sep=""), header = T, showProgress=FALSE)) }
+    
+    coef_trait = list()
+    glm_trait  = list()
+    
+    rdataAnnots = list.files(path = paste(srcPath,'/annotations/bedtools/',sep=""), full.names = T, pattern = '.txt')
+    rdataAnnots = rdataAnnots[grepl(paste(opt$out,".txt",sep=""), rdataAnnots)]
+    rdataAnnots
+    
+    for( a in 1:length(rdataAnnots)){
+      
+      cat("\rLoading variant annotations:",rdataAnnots[[a]],"...")
+      
+      # read in and convert to wide format 
+      
+      bedtooled = fread(rdataAnnots[[a]], header = FALSE)
+      bedtooled = bedtooled[,c(1,2,4,8)]
+      bedtooled = bedtooled[!duplicated(bedtooled)]
+      bedtooled$value = 1
+      
+      chr_annots = paste("chr",1:22,sep = "")
+      
+      cast_list = list()
+      for(chr in 1:length(chr_annots)){
+      cat("\n....Munging annotations for chr:",chr)
+      subed = bedtooled[bedtooled$V1 %in% chr_annots[[chr]]]
+      if(nrow(subed) < 1) next
+      cast = dcast.data.table(subed, V4 ~ V8, value.var="value")
+      setnames(setDT(cast),"V4","SNP") # rename SNP column
+      cast[is.na(cast)] = 0
+      
+      # merge data table with ld.df stats
+      tmp = merge(setDT(intervals[,c("SNP","INDEX")]), cast, by = "SNP")
       # 
-      freq_annot = table(all_df[,colnames(all_df) %in% tracks[[b]]])/nrow(all_df)
+      tmp = as.data.frame(tmp)
+      tmp = tmp[,!colnames(tmp) %in% "SNP"]
+      tmp = tmp[!duplicated(tmp$INDEX), ]
       
-      if(length(freq_annot) < 2) next
+      cat("\n    Number of unique annotations detected:", ncol(cast)-1)
+      # tmp[is.na(tmp)] = 0
+      cast_list[[chr]] = setDT(tmp)
+      }
+      
+      cast = rbindlist(cast_list, fill = TRUE)
+      
+      
+      # append missing snps 
+      missing_snps = unique(ld.df$INDEX)
+      missing_snps = missing_snps[!missing_snps %in% cast$INDEX]
+      
+      empty = matrix(0, nrow = length(missing_snps), ncol = ncol(cast)-1)
+      empty_df = data.frame(SNP = missing_snps, empty)
+      colnames(empty_df) = colnames(cast)
+      
+      cat("\n    Resolving missingness")
+      full_annot = rbindlist(list(setDT(empty_df), setDT(cast)))
+      full_annot = as.data.frame(full_annot)
+      colnames(full_annot)[1] = "INDEX"
+      
+      # merge data table with ld.df stats
+      tmp = merge(ld.df, full_annot, by = "INDEX")
+      tmp = as.data.frame(tmp)
+      tmp[is.na(tmp)] = 0
+     
+      # fix format of annotation labels 
+      all_df = tmp
+      
+      new.tracks = sub("[[:punct:]]", "", colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)])
+      new.tracks = gsub("[-|,/;:'() ]", "_", colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)])
+      new.tracks = gsub("[+]", "_", new.tracks)
+      new.tracks = paste("ID_", new.tracks, sep = "")
+      colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)] = new.tracks
+      
+      # threshold for declaring genome-wide significace 
+      gwas.sig.threshold = -log10(5e-08) # threshold for calling INDEX marker genome-wide significant
+      
+      
+      # check for genome-wide significant variants per annotation
+      minColAnnots = ncol(ld.df)+1
+      
+      gw.sig.vars = all_df[all_df$LOGP >= gwas.sig.threshold, ]
+      if(ncol(gw.sig.vars) > minColAnnots){gw.sig.vars.hits = colSums(gw.sig.vars[,minColAnnots:ncol(gw.sig.vars)])} else {gw.sig.vars.hits = sum(gw.sig.vars[,minColAnnots]); names(gw.sig.vars.hits) = colnames(gw.sig.vars)[minColAnnots]}
+      
+      # calculate frequency of 1s in columns  
+      
+      if( ncol(all_df) > minColAnnots){freq_annot = colSums(all_df[, minColAnnots:ncol(all_df)])} else{freq_annot = sum(all_df[,minColAnnots]); names(freq_annot) = colnames(all_df)[[minColAnnots]]}
+      
+      # minimum annotation frequency
+      minAnnotFreq = opt$`annot-cnt`
+      
+      low_freq = freq_annot[freq_annot < minAnnotFreq]
+      
+      cat("\nTotal number of annotations:", length(freq_annot))
+      
+      # annotation QC step:
+      removed_annots = length(low_freq)
+      cat("\nRemoved",removed_annots,"annotations due to low frequency: (<",minAnnotFreq,"counts)\n")
       
       ## Enrichment analysis
+      all_df = as.data.frame(all_df)
+      all_df = all_df[,!colnames(all_df) %in% names(low_freq)]
+      all_df = data.frame(inv_maf = 1/all_df$MAF, inv_ldscore = 1/all_df$LDSCORE, all_df)
+      all_df$inv_maf = 1/all_df$MAF
+      all_df$inv_ldscore = 1/all_df$LDSCORE
       
-      
-      gwas.sig.annot.hits = all_df[all_df$LOGP >= gwas.sig.threshold & all_df[,colnames(all_df) %in% tracks[[b]]] == 1, ]
-      n.gwas.hits = nrow(gwas.sig.annot.hits)
-      
-      
-      gw.vars = paste(gwas.sig.annot.hits$INDEX, collapse = "|", sep = "")
-      
-      
-      lmform = formula(paste("ZSCORE ~ LDSCORE  + MAF  + ", tracks[[b]]))
-  
-      
-      fit = lm(lmform, data = all_df, weights = (1/all_df$MAF))
-      # fit = logistf::logistf(binary_hits  ~ PT + MAF, data = df)
-      coef = summary(fit)$coefficients
-      coef = as.data.frame(coef)
-      # coef$OR = exp(coef$Estimate)
-      coef$pred = rownames(coef)
-      coef$df = paste(summary(fit)$df, sep ="", collapse= "//")
-      coef$resp = tracks[[b]]
-      coef$rsq = summary(fit)$r.squared
-      coef$GWS_VAR_HITS = gw.vars
-      coef$freq = freq_annot[[2]]
-      coef$annot = basename(lapply(strsplit(paths[[a]], "[+]"), function(x) x[[1]])[[1]])
-      
-      ## Rapid permutation (GW-SIG):
-      pval.check = coef$`Pr(>|t|)`[coef$pred %in% tracks[[b]]] 
-      pval.check
-
-      perm_df <- data.frame(GW1_5e08_perm = NA,
-                            GW2_1e06_perm = NA,
-                            GW3_1e04_perm = NA)
-
-      if(pval.check < permStartThreshold & coef$Estimate[coef$pred %in% tracks[[b]]] > 0) {
-
-        gws.hits.1 = all_df[all_df$P < 5e-08, ]
-        gws.hits.2 = all_df[all_df$P < 1e-06, ]
-        gws.hits.3 = all_df[all_df$P < 1e-04, ]
-
-        gw.sig.list = list(gws.hits.1, gws.hits.2,gws.hits.3)
-        names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
-
-        perm_p = list(slot1 = NA, slot2= NA, slot3=NA)
-        
-        bounds = list()
-        for( s in 1:length(gw.sig.list)){
-
-          set = gw.sig.list[[s]]
-
-          if(length(tracks) > 1){set.hits = colSums(set[,colnames(set) %in% tracks])} else {set.hits = sum(set[,colnames(set) %in% tracks])}
-         
-          # iterate over annotations, calculate summary statistics
-          premelt = set[,colnames(set) %in% c("INDEX", tracks)]
-          premelt = melt(premelt)
-          hit_melt = premelt[premelt$value == 1, ]
+          tracks = colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)]
+          tracks = tracks[!tracks %in% c("inv_ldscore", "inv_maf")]
           
-          snp_var_names = paste(premelt$INDEX, collapse = "|", sep = "")
+          cat("\nTotal number of LD-intervals available for enrichment tests:", nrow(all_df),"\n")
           
-          if(nrow(set) < 1) next
+          if(length(tracks) < 1) next
           
-          premelt.counts = table(hit_melt$variable)
-          premelt = merge(set[,!colnames(set) %in% tracks], premelt, by ="INDEX")
-
-          if( nrow(premelt) > 0){
-
-            gwas.maf = aggregate(premelt$MAF, by=list(premelt$variable), mean)
-            gwas.maf.sd = aggregate(premelt$MAF, by=list(premelt$variable), function(x) c(sd(x), sqrt(length(x))))
-            gwas.maf.sd$ci = 1.96 * gwas.maf.sd$x[,1]/gwas.maf.sd$x[,2]
+          # FLEET enrichment analysis via linear regression
+          fits = list()
+          rsq.fits = list()
+          for( x in 1:length(tracks)){
+          cat('\r....Fitting linear models:',x)
+          model = lm(ZSCORE ~ as.matrix(all_df[,colnames(all_df) %in% c("LDSCORE",  "MAF", "inv_ldscore", "inv_maf", tracks[[x]])]), data = all_df, weights = (all_df$MAF^-1))
+          res = summary(model)$coefficients 
+          tidy = tidy(res)
+          names = strsplit(tidy$.rownames, "])")
+          names = lapply(names , function(x) x[[length(x)]])
+          tidy = data.frame(predictors = unlist(names), tidy)
+          
+          gwas_vars = gw.sig.vars[,c(tracks[[x]], "INDEX", "P")]
+          gwas_vars = ifelse(gwas_vars[,1] == 1, as.character(gwas_vars$INDEX), "")
+          gwas_vars = gwas_vars[!gwas_vars %in% ""]
+          gwas_vars = paste(gwas_vars, collapse = "|", sep = "")
+          
+          tidy = tidy[tidy$predictors %in% tracks[[x]], ]
+          tidy = tidy[,!colnames(tidy) %in% c(".rownames")]
+          tidy$GWSVARNAMES = ifelse( gwas_vars == "", "*", gwas_vars)
+          
+          fits[[x]] = tidy
+          
+          rsq.fits[[x]] = summary(model)$r.squared
+          
+          if(opt$robust == TRUE){
             
-            gwas.ld = aggregate(premelt$LDSCORE, by=list(premelt$variable), mean)
-            gwas.ld.sd = aggregate(premelt$LDSCORE, by=list(premelt$variable), function(x) c(sd(x), sqrt(length(x))))
-            gwas.ld.sd$ci = 1.96 * gwas.ld.sd$x[,1]/gwas.ld.sd$x[,2]
-            
-            gwas.counts = nrow(set)
-            gwas.hits = table(as.character(premelt$variable))
-            
-            
-            t.out =  data.frame(id = gwas.maf$Group.1,
-                                     pthres = names(gw.sig.list)[[s]], 
-                                     n_gwas_var = gwas.counts,
-                                     n_gwas_var_hits = as.vector(gwas.hits), 
-                                     mean_maf = gwas.maf$x, 
-                                     ci_maf = gwas.maf.sd$ci,
-                                     mean_ldscore = gwas.ld$x, 
-                                     ci_ldscore = gwas.ld.sd$ci,
-                                    index = snp_var_names)
-            
-            t.out$ci_maf[is.na(t.out$ci_maf)] = t.out$mean_maf[is.na(t.out$ci_maf)]
-            t.out$ci_ldscore[is.na(t.out$ci_ldscore)] = t.out$mean_ldscore[is.na(t.out$ci_ldscore)]
-
-            bounds[[s]] = t.out
-            
-
+          hcmodel = vcovHC(model, omega = NULL, type = "HC4")
+          hcFit = coeftest(model, df = Inf, hcmodel) # adjust for heteroskedasticity w/ robust standard errors
+          hcTidy = tidy(hcFit)
+          
+          names = strsplit(hcTidy$term, "])")
+          names = lapply(names , function(x) x[[length(x)]])
+          hcTidy = data.frame(predictors = unlist(names), hcTidy)
+          
+          hcTidy = hcTidy[hcTidy$predictors %in% tracks[[x]], ]
+          hcTidy = hcTidy[,!colnames(hcTidy) %in% c("term")]
+          hcTidy$GWASVARNAMES = tidy$GWSVARNAMES
+          colnames(hcTidy) = colnames(tidy)
+          
+          fits[[x]] = hcTidy # overwrite slot with robust se
           }
           
-        }
         
-        bounds_df[[b]] = do.call(rbind, bounds)
+          }
+          
+          # Combine model results
+          coef_df = ldply(fits)
+          coef_df$rsq = unlist(rsq.fits) # Multiple R2 
+          coef_df$annot_cnt = freq_annot[names(freq_annot) %in% coef_df$predictors]
+          coef_df$annot_frq = coef_df$annot_cnt/nrow(all_df)
+          coef_df$GWS_VAR_HITS = gw.sig.vars.hits[names(gw.sig.vars.hits) %in% coef_df$predictors]
+          
+          # Permutation enrichment analysis
+          all_df = as.data.frame(all_df)
+          
+          if(opt$`fleet-permutation` == TRUE){
+      
+          if(opt$`fast-permutation` == TRUE){
+            # Randomize annotations, count number of variants below P-value threshold with annotation
+            cat("\nRunning permutation enrichment analysis in fast mode\n")
+    
+              gws.hits.1 = all_df$INDEX[all_df$P < 5e-08]
+              gws.hits.2 = all_df$INDEX[all_df$P < 1e-06]
+              gws.hits.3 = all_df$INDEX[all_df$P < 1e-04]
+
+              # gw.sig.list = list(gws.hits.1, gws.hits.2,gws.hits.3)
+              # names(gw.sig.list) = c(5e-08, 1e-06, 1e-04)
+              
+              # Number of variants with corresponding P-threshold in annotation
+              if(ncol(all_df) > minColAnnots){
+              pt1_hits = colSums(all_df[all_df$P < 5e-08, minColAnnots:ncol(all_df)])
+              pt2_hits = colSums(all_df[all_df$P < 1e-06, minColAnnots:ncol(all_df)])
+              pt3_hits = colSums(all_df[all_df$P < 1e-04, minColAnnots:ncol(all_df)])
+              } else {
+              pt1_hits = sum(all_df[all_df$P < 5e-08, ncol(all_df)])
+              pt2_hits = sum(all_df[all_df$P < 1e-06, ncol(all_df)])
+              pt3_hits = sum(all_df[all_df$P < 1e-04, ncol(all_df)])
+              }
+              
+              # randomize all_df nPerm times
+              cat("\n")
+              
+              random_pt1_hits = list()
+              random_pt2_hits = list()
+              random_pt3_hits = list()
+              
+              for(x in 1:opt$nPerms){
+                cat("\r    Permutation:",x)
+                
+                randomize = as.data.frame(all_df)
+                randomize$LOGP = sample(randomize$LOGP)
+                
+                if(ncol(randomize) > 2){
+                random_pt1_hits[[x]] = colSums(randomize[randomize$LOGP >= gwas.sig.threshold, minColAnnots:ncol(randomize)])
+                random_pt2_hits[[x]] = colSums(randomize[randomize$LOGP >= gwas.sig.threshold, minColAnnots:ncol(randomize)])
+                random_pt3_hits[[x]] = colSums(randomize[randomize$LOGP >= gwas.sig.threshold, minColAnnots:ncol(randomize)])} else {
+                  random_pt1_hits[[x]] = sum(randomize[randomize$LOGP >= gwas.sig.threshold, ncol(randomize)])
+                  random_pt2_hits[[x]] = sum(randomize[randomize$LOGP >= gwas.sig.threshold, ncol(randomize)])
+                  random_pt3_hits[[x]] = sum(randomize[randomize$LOGP >= gwas.sig.threshold, ncol(randomize)])
+                }
+                
+              }
+              random_pt1_hits = do.call(cbind, random_pt1_hits)
+              random_pt2_hits = do.call(cbind, random_pt2_hits)
+              random_pt3_hits = do.call(cbind, random_pt3_hits)
+              
+              
+              cat("\r    Calculating empirical p-values")
+              perm_out = list()
+              for(x in 1:length(pt1_hits)){
+                
+                pval_perm1 = sum(random_pt1_hits[x, ] >= pt1_hits[[x]])/opt$nPerms
+                if(pval_perm1 == 0){pval_perm1 = 1/opt$nPerms}
+                pval_perm2 = sum(random_pt2_hits[x, ] >= pt2_hits[[x]])/opt$nPerms
+                if(pval_perm2 == 0){pval_perm2 = 1/opt$nPerms}
+                pval_perm3 = sum(random_pt3_hits[x, ] >= pt3_hits[[x]])/opt$nPerms
+                if(pval_perm3 == 0){pval_perm3 = 1/opt$nPerms}
+                
+                perm_out[[x]] = data.frame(predictors = names(pt1_hits)[[x]], EmpP_pt1 = pval_perm1, EmpP_pt2 = pval_perm2, EmpP_pt3 = pval_perm3, OBSCNT = pt1_hits[[x]], MEANOBSP = mean(random_pt1_hits[x,]))
+                
+              }
+              perm_out_df = ldply(perm_out)
+              
+              
+              cat("\n...Compiling enrichment statistics")
+              coef_df = merge(coef_df, perm_out_df, by='predictors',all=T)
+              
+            }
+            
+            
+              if(opt$`robust-permutation` == TRUE){
+                
+                cat("\nRunning permutation analysis in robust mode!\n")
+                
+                ## Run permutation (GW-SIG):
+                # pval.check = which(coef_df$`Pr(>|t|)` <= opt$permStartThreshold & coef_df$Estimate > 0)
+                
+                dt = setDT(all_df)
+                
+                gc()
+    
+                  # subset SNPs by significance thresold
+                  if(opt$pthres != ""){pthreshold = read.table(opt$pthres, header = F)[,2]} else{pthreshold=c(5e-08, 1e-07, 1e-06)}
+                  
+                  # how many permutations to run per annotation
+                  nPerms = opt$nPerms
+                  
+                  ptPermDf = list()
+                  for(pt in 1:length(pthreshold)){
+                    
+                  gws.hits.1 = dt[dt$P < pthreshold[[pt]]]
+                 
+                  
+                  # calculate number of "hits" among top SNPs
+                  if(length(tracks) > 1){hits1 = colSums(gws.hits.1[,tracks,with=FALSE])}
+                  if(length(tracks) == 1){hits1 = sum(gws.hits.1[,tracks,with=FALSE]); names(hits1) = tracks}
+                  
+                  hits1 = hits1[hits1 > 0]
+                  
+                  if(length(hits1) >= 1){
+                  
+                  sub = as.data.frame(gws.hits.1[,c(names(hits1), "INDEX"), with=FALSE])
+                  sub = suppressMessages(melt(sub))
+                  sub = sub[sub$value == 1, ]
+                  sub = merge(setDT(sub), gws.hits.1[,c("INDEX", "MAF"),with=FALSE], by= "INDEX")
+                  
+                  # calculate avg minor allele frequency for SNPs below Pt in annotation
+                  avg.maf = aggregate(sub$MAF, by = list(sub$variable), mean)
+                  colnames(avg.maf) = c("variable", "mean.maf")
+                  sd.maf = aggregate(sub$MAF, by = list(sub$variable), sd)
+                  size.bin = aggregate(sub$MAF, by = list(sub$variable), length)
+                  avg.maf$SE = sd.maf$x/sqrt(size.bin$x)
+                  avg.maf$SE[is.na(avg.maf$SE)] = 0
+                  avg.maf$CI = 1.96 * sd.maf$x/sqrt(size.bin$x)
+                  avg.maf$CI[is.na(avg.maf$CI)] = 0
+                  avg.maf$CI_high = avg.maf$mean.maf + avg.maf$CI
+                  avg.maf$CI_low = abs(avg.maf$mean.maf - avg.maf$CI)
+                  avg.maf$variable = as.character(avg.maf$variable)
+                  
+              
+                  gc()
+                  
+                  permPval = list()
+                  for(v in 1:nrow(avg.maf)){
+                    start.clock = proc.time()
+                    cat("\r   Permutation analysis with threshold P-value < ", pthreshold[[pt]] ,":",round(v/nrow(avg.maf)*100, 2),"% complete")
+                    
+                    
+                    permutable = dt[!dt$INDEX %in% gws.hits.1$INDEX & dt$MAF >= floor(avg.maf$CI_low[[v]]) & dt$MAF <= ceiling(avg.maf$CI_high[[v]]), c("LOGP", "INDEX", "MAF", avg.maf$variable[[v]]),with=FALSE]
+                    
+                    total_size = nrow(gws.hits.1)
+                    hit_ratio = (hits1[names(hits1) %in% avg.maf$variable[[v]]]/total_size)[[1]]
+                    
+                    if(nrow(permutable) > total_size){ 
+                    
+                    permSum = list(rep(NA, nPerms))
+                    for(p in 1:nPerms){
+                    tmp = permutable[sample(nrow(permutable), total_size)]
+                    permSum[[p]] = sum(tmp[,4])/nrow(tmp)
+                    rm(tmp) # remove vector
+                    }
+                    
+                    pval = sum(unlist(permSum) >= hit_ratio)/nPerms} else {pval = NA}
+                    
+                    
+                    permPval[[v]] = pval
+                    
+                    secs = proc.time() - start.clock
+                  }
+                 
+                  colHeaderA = paste("Emp_P",pt,sep="")
+                  permDf = data.frame(predictors = avg.maf$variable, Pval = unlist(permPval))
+                  colnames(permDf)[2] = colHeaderA
+                  
+                  cat("\n")
+                  
+                  # ptPermDf[[pt]] = permDf
+                  
+                  coef_df = merge(coef_df, permDf, by = "predictors", all.x = TRUE)
+                  
+                  }
+                  
+                  }
+              
+                  
+
+                  # perm_sets_df = Reduce(function(x,y) merge(x,y,by='predictors',all=TRUE), ptPermDf)
+          
+                  # if(nrow(perm_sets_df) > 0){coef_df = merge(coef_df, perm_sets_df, by = "predictors", all = TRUE)}
+
+          
+          } # close if (pval check)
+
+        } # close if (slow permutation)
+            
+        cat("\nWriting results...\n")
+        # coef_df = data.frame(predictors = coef_df$predictors, coef_df[,!colnames(coef_df) %in% "predictors"])
+        # names(coef_df)[names(coef_df) %in% c("estimate", "std.error", "statistic", "p.value", "rsq")] = c("Beta", "SE", "Tstat", "Pval", "ModelR2")
+        # coef_df$predictors = substring(coef_df$predictors, 4, nchar(as.character(coef_df$predictors))) # Munge summary statistics (enrichment tests)
         
-
-        # perm_df <- data.frame(GW1_5e08_perm = perm_p[[1]],
-                              # GW2_1e06_perm = perm_p[[2]])
-      }
+        if(a == 1) { write.table(coef_df, file = paste(srcPath,"/out/",opt$out,"_fleetEnrichment.txt",sep=""), quote = F, row.names = F, sep = "\t")} else{ write.table(coef_df, file = paste(srcPath,"/out/",opt$out,"_fleetEnrichment.txt",sep=""), quote = F, row.names = F, col.names = F, sep = "\t", append = TRUE)}
+          
       
-      # coef = cbind(coef, bounds_df)
-      
-      
-      glm_list[[b]] = coef
-      
-      
-      
-    }
+    } # close for loop (run next annotation set)
     
-    all_bounds = ldply(bounds_df)
-    all_bounds = all_bounds[!duplicated(all_bounds), ]
-    
-    split_bounds = split(all_bounds, all_bounds$id)
-    
-    no_rows = lapply(split_bounds, nrow)
-    no_rows = which(unlist(no_rows) < 1)
-    
-    if(length(no_rows) > 0){split_bounds = split_bounds[-no_rows]}
-    
-    all_df = data.table(all_df)
-    
-    ## Permutations over set 
-    
-    if(length(split_bounds) > 0){
-
-    for(p in 1:length(split_bounds)){
-      
-      cat("\rPermutation of set:", p)
-      splim = split_bounds[[p]]
-      
-      if(nrow(splim) < 1) next
-      
-      
-      grab = lapply(1:nrow(splim), function(x) all_df[all_df$MAF > splim$mean_maf[[x]] - splim$ci_maf[[x]] &  
-                                                        all_df$MAF < splim$mean_maf[[x]] + splim$ci_maf[[x]]])
-      
-    
-      sizes = lapply(grab, nrow)
-      
-      
-      
-      grab = lapply(grab, data.frame)
-      size_sample = splim$n_gwas_var
-     
-      size_error = which(unlist(sizes) < unlist(size_sample))
+} # close fleetTest()
   
-      
-      sample_sum = list()
-      for( perms in 1:nPerms){
-       
-      # cat("\r Sampling SNPs from LD-score matched distribution:",perms)
-      
-      sampled = lapply(1:length(size_sample), function(x) grab[[x]][sample(nrow(grab[[x]]), size_sample[[x]]), ])
-      sampled = lapply(sampled, function(x) x[,colnames(x) %in% names(split_bounds)[[p]]])
-      sampled = lapply(sampled, sum)
-      names(sampled) = splim$pthres
-      sample_sum[[perms]] = sampled
-      
-      }
-      
-      if(nrow(splim) == 1){sdf = unlist(sample_sum); splim$perm_pval = sum(sdf > splim$n_gwas_var_hits)/nPerms}
 
-      
-      if(nrow(splim ) > 1){
-        
-        sdf = as.data.frame(do.call(rbind, sample_sum))
-        sdf_sum = lapply(sdf, function(x) unlist(x))
-        
-        sdf_pval = list()
-        for( z in 1:nrow(splim)){
-          sdf_pval[[z]] = sum(sdf_sum[[z]]/size_sample > splim$n_gwas_var_hits[[z]]/splim$n_gwas_var[[z]])/nPerms
-        }
-        
-        splim$perm_pval = unlist(sdf_pval)
-      
-        
-      }
-      
-      
-      split_bounds[[p]] = splim
-      
-    }
+### Plotting mechanisms:
 
-    perm_annot = as.data.frame(do.call(rbind, split_bounds))
-    perm_annot$perm_pval[perm_annot$perm_pval == 0] = 1/nPerms
-    
-    write.csv(perm_annot, file = paste(summary_stats, names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[n]]), sep = ""), "_PERMUTATION.csv", sep = "" ), quote = F, row.names = F)
-    }
-    
-    cat("\n")
-    
-    
-    glm_all = ldply(glm_list)
-    glm_all = glm_all[glm_all$pred %in% tracks,]
-    glm_all = glm_all[order(glm_all[,4], decreasing= F), ]
-    glm_all$trait = basename(gwas[[n]])
-    glm_all = glm_all[order(glm_all$`Pr(>|t|)`,decreasing = T),]
-    
-    glm_trait[[a]] = glm_all
-    
-    
-    write.csv(glm_all, file = paste(summary_stats, names(paths)[[a]], "_", paste("CLUMP_",basename(gwas[[n]]), sep = ""), "_REGRESSION.csv", sep = "" ), quote = F, row.names = F)
-   
-    gc()
-  }
+fleetPlot = function(x) {
   
-  glm_combine[[n]] = glm_trait
+####### start qq plot ########
+par(mfrow=c(1,1))
+
+coef_df = read.table(paste(srcPath,"/out/",opt$out,"_fleetEnrichment.txt",sep=""), header = T, fill = NA)
+
+coef_df  = coef_df[coef_df$Estimate > 0 & !is.na(coef_df$Estimate), ]
+
+observed <- sort(coef_df$Pr...t..)
+lobs <- -(log10(as.numeric(observed)))
+lobs[lobs > 8] <- 8
+
+expected <- c(1:length(observed))
+lexp <- -(log10(expected / (length(expected)+1)))
+
+pvalues = coef_df$Pr...t..
+nn<-sapply(pvalues, length)
+rs<-cumsum(nn)
+re<-rs-nn+1
+n<-min(nn)
+
+conf.alpha = .05
+conf.points = length(pvalues)
+# conf.points = 10e3
+n = length(pvalues);
+# n = 1e03
+mpts<-matrix(nrow=conf.points*2, ncol=2)
+for(i in seq(from=1, to=conf.points)) {
+  mpts[i,1]<- -log10((i-.5)/n)
+  mpts[i,2]<- -log10(qbeta(1-conf.alpha/2, i, n-i))
+  mpts[conf.points*2+1-i,1] <- -log10((i-.5)/n)
+  mpts[conf.points*2+1-i,2] <- -log10(qbeta(conf.alpha/2, i, n-i))
+}
+
+title= "Quantile-Quantile Plot"
+
+medianchi = median(qchisq(coef_df$Pr...t.., df = 1,lower.tail = F), na.rm = T)
+lambda = medianchi/0.454
+
+plot (0,0,type="n", xlim=c(0,max(lexp)), ylim=c(0,max(lobs)), xlab="Expected -log10 (P)",
+      main = title,
+      cex.lab =1.0, cex.axis=1.15,
+      ylab = "Observed -log10 (P)", las=1 )
+polygon(x = mpts[,1], y=mpts[,2], col="gray90", border = "grey", lwd = 3)
+lines(c(0,8), c(0,8), col="black", lwd=1.5)
+
+points(x = lexp, y = lobs, pch = 8, cex = .5, col = "black")
+
+text(x = 2, y= 0.5, cex = 1, labels = substitute(paste("Median ", chi^2, " = ", MC), list(MC=format(medianchi, digits = 3))))
+text(x = 2,   y = .25, cex = 1, labels = substitute(paste(lambda, " = ", LM), list(LM=format(lambda,digits = 4))))
+
+####### end qq plot ########
+}
   
+
+
+
+### Run operations
+
+total_clock_start = proc.time()
+
+readSNPcoords() # always run (from 1000G)
+
+xMHCregion() # always run
+
+fleetReadGWAS()
+
+# readAnnots() # always run
+
+if(opt$`fleet-prune-ref` == TRUE){
+  refPrune()
 }
 
 
+if(opt$`fleet-annotate` == TRUE){
+  fleetLD() 
+  fleetAnnot()
+}
 
+if(opt$`fleet-enrichment` == TRUE & opt$`fleet-annotate` == FALSE){
+  
+  fleetLD() 
+  fleetTest()
+  
+}
 
-##################### Module E.  Plotting results and exporting summary statistics to an html file
-##########################################################################################################################
-##########################################################################################################################
-##########################################################################################################################
+if(opt$`fleet-enrichment` == TRUE & opt$`fleet-annotate` == TRUE){
+  
+  fleetTest()
+  
+}
 
+if(opt$plots == TRUE){
+  fleetPlots()
+}
 
+time_elap = proc.time()
+time_elap = abs(total_clock_start[[1]] - time_elap[[1]])
 
-
-  
-  names(annot.cat) = c("Gene regions",
-                       "Pathways",
-                       "DHS", "Chromatin modifications",
-                       "TF binding sites", "RBP binding sites",
-                       "Enhancers")
-  
-  
-  
-  for (g in 1:length(gwas)){
-    
-    basename = paste("*",basename(gwas[[g]]),"*_REGRESSION.csv", sep = "")
-    results = list.files(path = paste(path_to_fleet, "/summary_stats/", sep = ""), pattern = glob2rx(basename), full.names = TRUE)
-    results = lapply(results, function(x) read.csv(x, header = T))
-    results = plyr::ldply(results)
-    results = results[!is.na(results$annot), ]
-    
-    # results = results[results$freq > .01, ]
-    # results = results[results$annot %in% unlist(annot.cat), ]
-    
-    
-    # results = lapply(glm_combine, function(x) x[[1]])
-    # results = ldply(results)
-    #
-    results$P = results$Pr...t..
-    results$enrich = results$t.value
-    
-    results$logP = -log10(results$P)
-    results$bonf = p.adjust(results$P, "bonferroni")
-    results$fdr = p.adjust(results$P, "fdr")
-    results = results[order(results$annot), ]
-    annot.type = unique(results$annot)
-    results$label.top = NA
-    results$resp = gsub("_differentially_expressed_enhancers", "", results$resp)
-    results$resp = toupper(results$resp)
-    
-    split = split(results, as.character(results$annot))
-    split = lapply(split, function(x) x[order(x$P, decreasing = F), ])
-    
-    for(m in 1:length(split)){
-      
-      if(names(split)[[m]] == "HISTONE" | names(split)[[m]] == "DHS"){
-        
-        cell.grab.histone = c("brain|lobe|cortex|astro|cerebellum|pyramidal|lymph|B cell|frontal|hippo|cingulate|gyrus|neuro|pericyte|neutro|monocyte|dendritic|helper|lymphocyte|spleen|thymus|killer")
-        split[[m]] = split[[m]][grepl(cell.grab.histone,ignore.case = T, split[[m]]$resp),]
-        split[[m]] = split[[m]][!grepl("muscle|renal|liver|medalis|gastro",ignore.case = T, split[[m]]$resp),]
-        
-      }
-      
-      if(nrow(split[[m]]) < 2){ split[[m]]$label.top[[1]] = as.character(split[[m]]$resp[[1]])}
-      if(nrow(split[[m]]) > 2){ split[[m]]$label.top[1:2] = as.character(split[[m]]$resp[1:2])}
-    }
-    
-    results = as.data.frame(do.call(rbind, split))
-    # results$label.top[results$bonf > .05] <- NA
-    
-    col = rainbow(length(annot.cat))
-    names(col) = names(annot.cat)
-    col = as.data.frame(col)
-    col$features = as.character(rownames(col))
-    
-    n_tests = nrow(results)
-    alpha = .05/n_tests
-    alpha.z = qnorm(alpha)
-    
-    ## group annot.cat
-    
-    groups =  lapply(annot.cat, data.frame)
-    groups = ldply(groups)
-    colnames(groups) = c("features","annot")
-    
-    
-    results = merge(results, groups, by = "annot")
-    results = merge(results, col , by ="features")
-    
-    results = results[order(results$features), ]
-    
-    results$labels = results$resp
-    
-    results$label.top[results$P > .05 & results$enrich < 0] <- NA
-    
-    
-    
-    # results$z.value[results$z.value > 8] <- 8
-    # results$z.value[results$z.value < -8] <- -8
-    
-    # results = results[results$enrich > 0, ]
-    
-    trait.names = unique(results$trait)
-    
-    g = ggplot(results, aes(x = results$features, y= results$enrich, col = results$features)) + geom_point(position="jitter") + scale_colour_brewer(palette="Dark2") + theme_bw() +
-      xlab(NULL) + guides(col = FALSE) + geom_hline(yintercept = c(-alpha.z, 0, alpha.z), col = c("red", "black", "red"), linetype = c("dotted", "solid", "dotted"), size = 0.5)  +
-      ylim(min = min(-10, min(results$enrich*1.5)), max = max(10, max(results$enrich*1.5))) +
-      ylab("Annotation Enrichment (z-score)")  + geom_label_repel(label = results$label.top, size = 2, segment.color = NA)
-    
-    
-    
-    
-    
-    png(paste(path_to_fleet,"/broad_plots/JITTERPLOT_TRAIT=",trait.names,".png", sep = ""), res = 300, units = "in",  width= 8, height = 7)
-    print(g)
-    dev.off()
-    
-    
-    sig = results
-    
-    box = ggplot(sig, aes(x = sig$features, y = sig$logP, fill = sig$features))+ theme_bw() + geom_hline(yintercept = -log10(alpha), col = "red", linetype="dashed") +
-      geom_boxplot(width = 0.5) + xlab(NULL) + ylab("Significance (OR > 0), -log10(P)") +scale_fill_brewer(palette="Dark2") +guides(fill = FALSE) 
-    
-    png(paste(path_to_fleet,"/broad_plots/BOXPLOT_TRAIT=",trait.names,".png", sep = ""), res =300, units = "in", height = 5, width = 7)
-    print(box)
-    dev.off()
-    
-    ### X table 
-    
-    
-    require(xtable)
-    
-    sig = results[results$enrich > 0 & results$bonf < .05, ]
-    sig$PVAL = format(sig$P, scientific=  T, digits = 3)
-    sig$BONF= format(sig$bonf, scientific = T, digits = 3)
-    sig$FDR= format(sig$fdr, scientific = T, digits = 3)
-    sig$FREQ = format(sig$freq*100, digits= 1)
-    sig$BETA = sig$Estimate
-    sig$SE = sig$`Std. Error.`
-    xtab = xtable(sig[,colnames(sig) %in% c("features", "FDR", "resp", "BETA", "SE", "BONF", "FREQ", "PVAL")])
-    print.xtable(xtab, type="html", file= paste(path_to_fleet,"/enrichmentreport_",trait.names,".html", sep = ""))
-    
-    
-  }
-  
-  
-  
-  
-  
+cat("\nTotal time elapsed:", time_elap[[1]], "seconds\n")
+ 
+#close(log_con)
