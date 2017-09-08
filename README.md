@@ -16,6 +16,10 @@ https://github.com/hessJ/FLEET/wiki
 
 A description of the method is provided in the powerpoint slides (fleet_slides.ppt).
 
+## Run 
+
+    bash install.sh
+
 ## Display help commands/options:
 
     fleet.R --help 
