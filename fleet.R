@@ -580,7 +580,7 @@ fleetTest = function() {
       cat("\n....Gathering annotations for chr:",chr)
       subed = bedtooled[bedtooled$V1 %in% chr_annots[[chr]]]
       if(nrow(subed) < 1) next
-      cast = dcast.data.table(subed, V4 ~ V8, value.var="value")
+      cast = supressMessages(dcast.data.table(subed, V4 ~ V8, value.var="value"))
       setnames(setDT(cast),"V4","SNP") # rename SNP column
       cast[is.na(cast)] = 0
       
