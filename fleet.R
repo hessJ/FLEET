@@ -106,6 +106,9 @@ option_list = list(
   make_option("--robust-permutation", type="logical", default=FALSE, 
               help="Permutation analysis that will sample variants from the MAF bin of target SNPs [default = %default]", metavar="logical"),
   
+  make_option("--speed", type="character", default='fast', 
+              help="Change behavior of linear models (fast mode: SET becomes response variable, slow mode: Z-score becomes response variable) [default = %default]", metavar="character"),
+  
   make_option("--pthres", type="character", default="",
               help="Table with P-value threshold(s) for SNP bins [default P-values < 5e-08, 1e-07, and 1e-06]", metavar="character"),
   
@@ -333,7 +336,7 @@ fleetLD = function() {
   
  
   
-  cat("Munging pruned variants\n")
+  cat("Gathering pruned variants\n")
   
   # Read in clumps
   # clumped.df = lapply(clumped, function(x) fread(x, header = T, stringsAsFactors = FALSE))
@@ -380,7 +383,7 @@ fleetLD = function() {
   freqs.df = freqs.df[,cols,with = FALSE]
   # 
   # 
-  cat("....Calculating LD scores\n")
+  cat("....Calculating LD scores for index markers\n")
   # 
   # write.table(clumped.df$SNP, file = paste(srcPath,"/qc/clumped/INDEX.snplist",sep=""), quote = F, col.names = F)
   fwrite(data.table(cset$INDEX), nThread = opt$threads, file = paste(srcPath,"/qc/clumped/INDEX.snplist",sep=""), quote = F, col.names = F, row.names = F)
@@ -404,6 +407,15 @@ fleetLD = function() {
   ld.int = lapply(ld, function(x) fread(x, header = T, showProgress=FALSE))
   ld.int = rbindlist(ld.int)
   ld.int = as.data.frame(ld.int)
+  
+  # === calculate interval width (in base pairs)
+  IntervalStart = ld.int[order(ld.int$BP_B, decreasing = F), ]
+  IntervalStart = IntervalStart[!duplicated(IntervalStart$SNP_A), ]
+  IntervalEnd = ld.int[order(ld.int$BP_B, decreasing =T), ]
+  IntervalEnd = IntervalEnd[!duplicated(IntervalEnd$SNP_A), ]
+  IntervalStart = IntervalStart[match(IntervalEnd$SNP_A, IntervalEnd$SNP_A), ]
+  WIDTH = data.table(INDEX = IntervalStart$SNP_A, INT_WIDTH_KB = abs(IntervalStart$BP_B - IntervalEnd$BP_B)/1e3)
+  
   ld.int = ld.int[,colnames(ld.int) %in% c("SNP_A", "CHR_A", "BP_A", "SNP_B", "R2")]
   colnames(ld.int) = c("CHR","BP","INDEX","SNP","R2")
   
@@ -422,6 +434,9 @@ fleetLD = function() {
   ld.df = ld.df[!ld.df$INDEX %in% rownames(mhc), ]
   ld.df$INDEX = as.factor(ld.df$INDEX)
   
+  cat("....Adding interval width\n")
+  ld.df = merge(WIDTH, ld.df, by = "INDEX")
+  
   # 
   cat("....Finding LD friends for index variants\n")
   ld_friends = unlist(table(ld.int$INDEX))
@@ -439,10 +454,18 @@ fleetLD = function() {
   # ld.df$ZSCORE = qnorm(1-ld.df$P/2)
   # ld.df = merge(ld.df, ld.score, by="INDEX")
   
+  # inverse-rank normalization
+  my.invnorm = function(x){
+  res = rank(x)
+  res = qnorm(res/(length(res)+0.5))
+  return(res)
+}
+  
   ld.df = merge(ld.df, ld.score, by= "INDEX")
   ld.df$LOGP = -log10(ld.df$P)
   ld.df$P[ld.df$P < 1e-15] <- 1e-15
-  ld.df$ZSCORE = qnorm(1-ld.df$P/2)
+  ld.df$ZSCORE = qnorm(1-ld.df$P)
+  ld.df$ZSCORE = my.invnorm(ld.df$ZSCORE)
   
   # 
   fwrite(setDT(ld.df), file = paste(srcPath,"/out/",opt$out,".sumstats",sep=""),quote=F,row.names=F,sep="\t",showProgress = FALSE, nThread = opt$threads)
@@ -469,7 +492,7 @@ fleetAnnot = function(x) {
   # snp.bed = data.frame(snp.bed, empty = NA, empty = "+")
   write.table(snp.bed, file = paste(srcPath,"/annotations/bedtools/snp.bed",sep=""), quote = F, row.names = F, col.names = F, sep = "\t")
   
-  # load annotations, run bedtools: 
+  # === load annotations, run bedtools: 
   rdataAnnots = list.files(path = paste(srcPath,"/annotations/", sep=  ""), full.names = T, pattern = '.Rdata')
   rdataAnnots
   
@@ -486,7 +509,7 @@ fleetAnnot = function(x) {
     annot.bed = data.frame(annot.bed, empty = NA, empty = "+" )
     
     
-    # size of matrix
+    # === size of matrix
     castMb = round( nrow(annot.bed) * ncol(annot.bed) * 8/1e6, 3)
     nAnnots = length(unique(annot.bed$id))
     
@@ -499,7 +522,7 @@ fleetAnnot = function(x) {
       trackChunks = split(unique.tracks, ceiling(seq_along(unique.tracks)/ chunkSize ))
       
       
-      # memory efficient operation for large annotation files: 
+      # === memory efficient operation for large annotation files: 
       for ( tc in 1:length(trackChunks)){
         
         write.table(annot.bed[annot.bed$id %in% trackChunks[[tc]], ], file = paste(srcPath,"/annotations/bedtools/",gsub(".Rdata", "", basename(rdataAnnots[[a]])),"_CHUNK_",tc,".bed",sep=""), quote= F, row.names = F, col.names = F, sep = "\t")
@@ -554,14 +577,14 @@ fleetTest = function() {
       
       cast_list = list()
       for(chr in 1:length(chr_annots)){
-      cat("\n....Munging annotations for chr:",chr)
+      cat("\n....Gathering annotations for chr:",chr)
       subed = bedtooled[bedtooled$V1 %in% chr_annots[[chr]]]
       if(nrow(subed) < 1) next
       cast = dcast.data.table(subed, V4 ~ V8, value.var="value")
       setnames(setDT(cast),"V4","SNP") # rename SNP column
       cast[is.na(cast)] = 0
       
-      # merge data table with ld.df stats
+      # === merge data table with ld.df stats
       tmp = merge(setDT(intervals[,c("SNP","INDEX")]), cast, by = "SNP")
       # 
       tmp = as.data.frame(tmp)
@@ -576,7 +599,7 @@ fleetTest = function() {
       cast = rbindlist(cast_list, fill = TRUE)
       
       
-      # append missing snps 
+      # === append missing snps 
       missing_snps = unique(ld.df$INDEX)
       missing_snps = missing_snps[!missing_snps %in% cast$INDEX]
       
@@ -589,12 +612,12 @@ fleetTest = function() {
       full_annot = as.data.frame(full_annot)
       colnames(full_annot)[1] = "INDEX"
       
-      # merge data table with ld.df stats
+      # === merge data table with ld.df stats
       tmp = merge(ld.df, full_annot, by = "INDEX")
       tmp = as.data.frame(tmp)
       tmp[is.na(tmp)] = 0
      
-      # fix format of annotation labels 
+      # === fix format of annotation labels 
       all_df = tmp
       
       new.tracks = sub("[[:punct:]]", "", colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)])
@@ -603,17 +626,17 @@ fleetTest = function() {
       new.tracks = paste("ID_", new.tracks, sep = "")
       colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)] = new.tracks
       
-      # threshold for declaring genome-wide significace 
+      # === threshold for declaring genome-wide significace 
       gwas.sig.threshold = -log10(5e-08) # threshold for calling INDEX marker genome-wide significant
       
       
-      # check for genome-wide significant variants per annotation
+      # === check for genome-wide significant variants per annotation
       minColAnnots = ncol(ld.df)+1
       
       gw.sig.vars = all_df[all_df$LOGP >= gwas.sig.threshold, ]
       if(ncol(gw.sig.vars) > minColAnnots){gw.sig.vars.hits = colSums(gw.sig.vars[,minColAnnots:ncol(gw.sig.vars)])} else {gw.sig.vars.hits = sum(gw.sig.vars[,minColAnnots]); names(gw.sig.vars.hits) = colnames(gw.sig.vars)[minColAnnots]}
       
-      # calculate frequency of 1s in columns  
+      # ===  calculate frequency of 1s in columns  
       
       if( ncol(all_df) > minColAnnots){freq_annot = colSums(all_df[, minColAnnots:ncol(all_df)])} else{freq_annot = sum(all_df[,minColAnnots]); names(freq_annot) = colnames(all_df)[[minColAnnots]]}
       
@@ -624,7 +647,7 @@ fleetTest = function() {
       
       cat("\nTotal number of annotations:", length(freq_annot))
       
-      # annotation QC step:
+      # === annotation QC step:
       removed_annots = length(low_freq)
       cat("\nRemoved",removed_annots,"annotations due to low frequency: (<",minAnnotFreq,"counts)\n")
       
@@ -632,8 +655,8 @@ fleetTest = function() {
       all_df = as.data.frame(all_df)
       all_df = all_df[,!colnames(all_df) %in% names(low_freq)]
       all_df = data.frame(inv_maf = 1/all_df$MAF, inv_ldscore = 1/all_df$LDSCORE, all_df)
-      all_df$inv_maf = 1/all_df$MAF
-      all_df$inv_ldscore = 1/all_df$LDSCORE
+      all_df$inv_maf = log(all_df$MAF)
+      all_df$inv_ldscore = log(all_df$LDSCORE)
       
           tracks = colnames(all_df)[!colnames(all_df) %in% colnames(ld.df)]
           tracks = tracks[!tracks %in% c("inv_ldscore", "inv_maf")]
@@ -642,12 +665,70 @@ fleetTest = function() {
           
           if(length(tracks) < 1) next
           
-          # FLEET enrichment analysis via linear regression
+          # === FLEET enrichment analysis via linear regression
           fits = list()
           rsq.fits = list()
+                
+                ## === New feature (October 3, 2017)
+                if(opt$speed == 'fast'){
+                  
+                    dt_all_df = data.table(all_df)
+                    
+                    misCol = colSums(dt_all_df[,colnames(dt_all_df) %in% tracks,with=F] == 1)
+                    
+                    misCol = misCol[misCol < opt$`annot-cnt`]
+                    
+                    if(length(misCol) > 0){
+                      
+                      dt_all_df = dt_all_df[,!colnames(dt_all_df) %in% names(misCol),with=F]}
+                    
+                    response_matrix = as.matrix(dt_all_df[,colnames(dt_all_df) %in% tracks,with=F])
+                    mod = model.matrix( ~ ZSCORE + LDSCORE + MAF + inv_ldscore + inv_maf + INT_WIDTH_KB, dt_all_df)
+                    
+                    cat("\r...Running linear regression in fast mode!\n")
+                    start_reg = proc.time()
+                    lmFast = lm(response_matrix ~ mod)
+                    cat("\r...Time to complete regression:", (proc.time() - start_reg)[3], 'seconds')
+                    lmFastCoef = summary(lmFast)
+                    if(ncol(response_matrix) > 1){
+                    lmCoef = lapply(lmFastCoef, function(x) broom::tidy(x$coefficients))
+                    names(lmCoef) = tracks
+                    lmDf = ldply(lmCoef)} else{
+                    lmCoef = broom::tidy(summary(lmFast)$coefficients)
+                    lmDf = data.frame(SET_NAME = tracks, lmCoef)
+                    }
+                    
+                    lmDf = lmDf[lmDf$.rownames %in% "modZSCORE", ]
+                    colnames(lmDf) = c("SET_NAME", "Term", "Beta", "SE", "T","P")
+                    lmDf = lmDf[,!colnames(lmDf) %in% "Term"]
+                    
+                    gwVars = gw.sig.vars[,colnames(gw.sig.vars) %in% c("INDEX",tracks)]
+                    
+                    # === annotate lm stats for annotations with genome-wide significant variants
+                    if(nrow(gwVars) > 0){
+                      
+                    gwVars = suppressMessages(melt(gwVars))
+                    gwVars = gwVars[!gwVars$value == 0, ]
+                    gwVars_agg = aggregate(gwVars$INDEX, by=list(gwVars$variable), function(x) paste(x, collapse="|",sep=""))
+                    colnames(gwVars_agg) = c("SET_NAME","GWS_VAR_HITS")
+                    gwVars_agg = gwVars_agg[match(lmDf$SET_NAME, gwVars_agg$SET_NAME), ]
+                    gwVars_agg$SET_NAME = lmDf$SET_NAME
+                    gwVars_agg$GWS_VAR_HITS[is.na(gwVars_agg$GWS_VAR_HITS)] = "*"
+                    lmDf$GWS_VAR_HITS = gwVars_agg$GWS_VAR_HITS 
+                    } else {lmDf$GWS_VAR_HITS = "*"}
+                    
+                    lmDf$SET_NAME = gsub("ID_", "", lmDf$SET_NAME)
+                    lmDf$SET_NAME = gsub("_",".", lmDf$SET_NAME)
+                    coef_df = lmDf
+                    
+                    }
+                
+          if(opt$speed == "slow"){
           for( x in 1:length(tracks)){
+            
           cat('\r....Fitting linear models:',x)
-          model = lm(ZSCORE ~ as.matrix(all_df[,colnames(all_df) %in% c("LDSCORE",  "MAF", "inv_ldscore", "inv_maf", tracks[[x]])]), data = all_df, weights = (all_df$MAF^-1))
+          #model = lm(ZSCORE ~ as.matrix(all_df[,colnames(all_df) %in% c("LDSCORE",  "MAF", "inv_ldscore", "inv_maf", tracks[[x]])]), data = all_df, weights = (all_df$MAF^-1))
+          model = lm(ZSCORE ~ as.matrix(all_df[,colnames(all_df) %in% c("LDSCORE",  "MAF", "inv_ldscore", "INT_WIDTH_KB", "inv_maf", tracks[[x]])]), data = all_df)
           res = summary(model)$coefficients 
           tidy = tidy(res)
           names = strsplit(tidy$.rownames, "])")
@@ -659,9 +740,13 @@ fleetTest = function() {
           gwas_vars = gwas_vars[!gwas_vars %in% ""]
           gwas_vars = paste(gwas_vars, collapse = "|", sep = "")
           
+          SETNAME = strsplit(gsub(opt$out, "", basename(rdataAnnots[[a]])), "_CHUNK")[[1]][[1]]
+          SETNAME = gsub("_|_.txt|.txt", "", SETNAME)
+          
           tidy = tidy[tidy$predictors %in% tracks[[x]], ]
           tidy = tidy[,!colnames(tidy) %in% c(".rownames")]
           tidy$GWSVARNAMES = ifelse( gwas_vars == "", "*", gwas_vars)
+          tidy$SET_SOURCE = SETNAME
           
           fits[[x]] = tidy
           
@@ -680,6 +765,7 @@ fleetTest = function() {
           hcTidy = hcTidy[hcTidy$predictors %in% tracks[[x]], ]
           hcTidy = hcTidy[,!colnames(hcTidy) %in% c("term")]
           hcTidy$GWASVARNAMES = tidy$GWSVARNAMES
+          hcTidy$SET_SOURCE = SETNAME
           colnames(hcTidy) = colnames(tidy)
           
           fits[[x]] = hcTidy # overwrite slot with robust se
@@ -694,6 +780,7 @@ fleetTest = function() {
           coef_df$annot_cnt = freq_annot[names(freq_annot) %in% coef_df$predictors]
           coef_df$annot_frq = coef_df$annot_cnt/nrow(all_df)
           coef_df$GWS_VAR_HITS = gw.sig.vars.hits[names(gw.sig.vars.hits) %in% coef_df$predictors]
+          }
           
           # Permutation enrichment analysis
           all_df = as.data.frame(all_df)
@@ -761,14 +848,14 @@ fleetTest = function() {
                 pval_perm3 = sum(random_pt3_hits[x, ] >= pt3_hits[[x]])/opt$nPerms
                 if(pval_perm3 == 0){pval_perm3 = 1/opt$nPerms}
                 
-                perm_out[[x]] = data.frame(predictors = names(pt1_hits)[[x]], EmpP_pt1 = pval_perm1, EmpP_pt2 = pval_perm2, EmpP_pt3 = pval_perm3, OBSCNT = pt1_hits[[x]], MEANOBSP = mean(random_pt1_hits[x,]))
+                perm_out[[x]] = data.frame(SET_NAME = names(pt1_hits)[[x]], EmpP_pt1 = pval_perm1, EmpP_pt2 = pval_perm2, EmpP_pt3 = pval_perm3, OBSCNT = pt1_hits[[x]], MEANOBSP = mean(random_pt1_hits[x,]))
                 
               }
               perm_out_df = ldply(perm_out)
               
               
               cat("\n...Compiling enrichment statistics")
-              coef_df = merge(coef_df, perm_out_df, by='predictors',all=T)
+              coef_df = merge(coef_df, perm_out_df, by='SET_NAME',all=T)
               
             }
             
@@ -854,14 +941,14 @@ fleetTest = function() {
                   }
                  
                   colHeaderA = paste("Emp_P",pt,sep="")
-                  permDf = data.frame(predictors = avg.maf$variable, Pval = unlist(permPval))
+                  permDf = data.frame(SET_NAME = avg.maf$variable, Pval = unlist(permPval))
                   colnames(permDf)[2] = colHeaderA
                   
                   cat("\n")
                   
                   # ptPermDf[[pt]] = permDf
                   
-                  coef_df = merge(coef_df, permDf, by = "predictors", all.x = TRUE)
+                  coef_df = merge(coef_df, permDf, by = "SET_NAME", all.x = TRUE)
                   
                   }
                   
