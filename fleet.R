@@ -333,11 +333,7 @@ fleetLD = function() {
   # clumped = list.files(path = paste(srcPath,"/qc/clumped/",sep=""), full.names = T, pattern = glob2rx("CLUMP*clumped"))
   clumped = list.files(path = paste(srcPath,"/qc/pruned/",sep=""), full.names = T, pattern = glob2rx("*prune.in"))
   # clumped = clumped[grepl(opt$out, clumped)]
-  
  
-  
-  cat("Gathering pruned variants\n")
-  
   # Read in clumps
   # clumped.df = lapply(clumped, function(x) fread(x, header = T, stringsAsFactors = FALSE))
   clumped.df = lapply(clumped, function(x) fread(x, header = F, stringsAsFactors = FALSE, showProgress=FALSE))
@@ -580,7 +576,7 @@ fleetTest = function() {
       cat("\n....Gathering annotations for chr:",chr)
       subed = bedtooled[bedtooled$V1 %in% chr_annots[[chr]]]
       if(nrow(subed) < 1) next
-      cast = supressMessages(dcast.data.table(subed, V4 ~ V8, value.var="value"))
+      cast = suppressMessages(dcast.data.table(subed, V4 ~ V8, value.var="value"))
       setnames(setDT(cast),"V4","SNP") # rename SNP column
       cast[is.na(cast)] = 0
       
@@ -668,6 +664,11 @@ fleetTest = function() {
           # === FLEET enrichment analysis via linear regression
           fits = list()
           rsq.fits = list()
+          
+          
+          SETNAME = strsplit(gsub(opt$out, "", basename(rdataAnnots[[a]])), "_CHUNK")[[1]][[1]]
+          SETNAME = gsub("_|_.txt|.txt", "", SETNAME)
+          
                 
                 ## === New feature (October 3, 2017)
                 if(opt$speed == 'fast'){
@@ -690,25 +691,30 @@ fleetTest = function() {
                     lmFast = lm(response_matrix ~ mod)
                     cat("\r...Time to complete regression:", (proc.time() - start_reg)[3], 'seconds')
                     lmFastCoef = summary(lmFast)
+                    
                     if(ncol(response_matrix) > 1){
                     lmCoef = lapply(lmFastCoef, function(x) broom::tidy(x$coefficients))
                     names(lmCoef) = tracks
                     lmDf = ldply(lmCoef)} else{
                     lmCoef = broom::tidy(summary(lmFast)$coefficients)
-                    lmDf = data.frame(SET_NAME = tracks, lmCoef)
-                    }
+                    lmDf = data.frame(SET_NAME = tracks, lmCoef)}
+                    
                     
                     lmDf = lmDf[lmDf$.rownames %in% "modZSCORE", ]
                     colnames(lmDf) = c("SET_NAME", "Term", "Beta", "SE", "T","P")
                     lmDf = lmDf[,!colnames(lmDf) %in% "Term"]
                     
+                    lmDf$SET_SOURCE = SETNAME
+                    
                     gwVars = gw.sig.vars[,colnames(gw.sig.vars) %in% c("INDEX",tracks)]
+                    gwVars = suppressMessages(melt(gwVars))
+                    
+                    if(nrow(gwVars) > 0){gwVars = gwVars[!gwVars$value == 0, ]}
+                    
                     
                     # === annotate lm stats for annotations with genome-wide significant variants
                     if(nrow(gwVars) > 0){
                       
-                    gwVars = suppressMessages(melt(gwVars))
-                    gwVars = gwVars[!gwVars$value == 0, ]
                     gwVars_agg = aggregate(gwVars$INDEX, by=list(gwVars$variable), function(x) paste(x, collapse="|",sep=""))
                     colnames(gwVars_agg) = c("SET_NAME","GWS_VAR_HITS")
                     gwVars_agg = gwVars_agg[match(lmDf$SET_NAME, gwVars_agg$SET_NAME), ]
