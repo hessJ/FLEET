@@ -77,8 +77,8 @@ option_list = list(
   make_option(c("-T", "--threads"), type="integer", default=1, 
               help="Number of cores for parallel operations [default = %default]", metavar="integer"),
   
-  make_option(c("-L", "--label-annotations"), type="character", default=paste(srcPath,"/annotations/annotation.txt",sep=""), 
-              help="Path to annotation table [default = %default]", metavar="character"),
+  make_option(c("-L", "--label-annotations"), type="character", default="", 
+              help="Path to file containining labels for annotation sources", metavar="character"),
   
   make_option(c("-D", "--rd-annots"), type="character", default=paste(srcPath,"/annotations/",sep=""),
               help="Path to .Rdata annotations [default = %default]", metavar="character"),
