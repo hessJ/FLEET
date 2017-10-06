@@ -29,7 +29,8 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
   Will print something like this: 
   
   ```  
-  ==========================================================
+ 
+==========================================================
 *
 * Functional LD-interval EnrichmEnt Test (FLEET)
 *
@@ -39,10 +40,12 @@ A description of the method is provided in the powerpoint slides (fleet_slides.p
 *
 * Contact: hessjo@upstate.edu
 *
+* https://github.com/hessJ/FLEET
+*
 * GNU GENERAL PUBLIC LICENSE v3
 ===========================================================
 
-Start time: 2017-07-25 18:55:04
+Start time: 2017-10-04 11:25:16
 
 Location of fleet: /Users/jonathanhess/Documents/FLEET/fleet.R
 Usage: /Users/jonathanhess/Documents/FLEET/fleet.R [options]
@@ -66,6 +69,9 @@ Options:
 
 	-P CHARACTER, --pcol=CHARACTER
 		P-value column header in GWAS file
+
+	--robust=DOUBLE
+		Computing robust standard errors using White method (via vcovHC function in sandwich pkg) [default = TRUE]
 
 	-N INTEGER, --nPerms=INTEGER
 		Number of permutations to perform [default = 1000]
@@ -95,10 +101,19 @@ Options:
 		Perform enrichment analysis with permutation (randomizing annotations) [default = TRUE]
 
 	--fast-permutation=LOGICAL
-		Perform enrichment analysis with permutation (randomizing annotations) [default = TRUE]
+		Simple permutation analysis [default = FALSE]
 
-	--slow-permutation=LOGICAL
-		Perform enrichment analysis with permutation (bootstrapping variants) [default = FALSE]
+	--robust-permutation=LOGICAL
+		Permutation analysis that will sample variants from the MAF bin of target SNPs [default = FALSE]
+
+	--speed=CHARACTER
+		Change behavior of linear models (fast mode: SET becomes response variable, slow mode: Z-score becomes response variable) [default = fast]
+
+	--pthres=CHARACTER
+		Table with P-value threshold(s) for SNP bins [default P-values < 5e-08, 1e-07, and 1e-06]
+
+	--plots=LOGICAL
+		Turning this on will produce multiple plots to display summary statistics [default = FALSE]
 
 	-h, --help
 		Show this help message and exit
