@@ -1,2 +1,17 @@
 *.Rdata filter=lfs diff=lfs merge=lfs -text
 *Rdata filter=lfs diff=lfs merge=lfs -text
+PATHWAYS.Rdata filter=lfs diff=lfs merge=lfs -text
+PROMOTER.Rdata filter=lfs diff=lfs merge=lfs -text
+RBP.Rdata filter=lfs diff=lfs merge=lfs -text
+SPLICESITE.Rdata filter=lfs diff=lfs merge=lfs -text
+DHS_small.Rdata filter=lfs diff=lfs merge=lfs -text
+FANTOM.Rdata filter=lfs diff=lfs merge=lfs -text
+FIVEUTR.Rdata filter=lfs diff=lfs merge=lfs -text
+MICRORNA.Rdata filter=lfs diff=lfs merge=lfs -text
+HISTONE_cell.Rdata filter=lfs diff=lfs merge=lfs -text
+TFBS.Rdata filter=lfs diff=lfs merge=lfs -text
+CODING.Rdata filter=lfs diff=lfs merge=lfs -text
+DHS_tissue.Rdata filter=lfs diff=lfs merge=lfs -text
+THREEUTR.Rdata filter=lfs diff=lfs merge=lfs -text
+HISTONE.Rdata filter=lfs diff=lfs merge=lfs -text
+INTRON.Rdata filter=lfs diff=lfs merge=lfs -text
