@@ -498,6 +498,10 @@ fleetAnnot = function(x) {
     
     # Convert annotation file to bedtools format:
     annot.gr = readRDS(rdataAnnots[[a]])
+    mhcCoords = GRanges(seqnames="chr6", IRanges(start = 24e6, end = 35e6))
+    MHCannotations = findOverlaps(annot.gr, mhcCoords)
+    if(length(queryHits(MHCannotations)) > 0){ annot.gr = annot.gr[-queryHits(MHCannotations)]}
+    
     names(annot.gr) = NULL # ensure rownames are NULL (this can create problems if duplicates exist, which is highly likely)
     annot.df = as.data.frame(annot.gr)
     annot.bed = annot.df[,c("seqnames", "start", "end", "id")]
