@@ -25,7 +25,7 @@ masthead = as.character("
 ||
 || Functional LD-interval EnrichmEnt Test (FLEET)
 ||
-|| Jonathan L. Hess, PhD and Stephen J. Glatt, PhD (c) 2017
+|| (C) 2017 Jonathan L. Hess, PhD and Stephen J. Glatt, PhD
 ||
 || SUNY Upstate Medical University, PsychGENe Lab
 ||
@@ -70,8 +70,8 @@ option_list = list(
   make_option(c("-P", "--pcol"), type="character", default="", 
               help="P-value column header in GWAS file", metavar="character"),
   
-  make_option(c("--robust"), type="logical", default=TRUE,
-              help="Computing robust standard errors using White method (via vcovHC function in sandwich pkg) [default = %default]", metavar="double"),
+  # make_option(c("--robust"), type="logical", default=TRUE,
+  #             help="Computing robust standard errors using White method (via vcovHC function in sandwich pkg) [default = %default]", metavar="double"),
   
   make_option(c("-N", "--nPerms"), type="integer", default=1000, 
               help="Number of permutations to perform [default = %default]", metavar="integer"),
@@ -88,13 +88,19 @@ option_list = list(
   make_option(c("-F", "--annot-cnt"), type="double", default=100, 
               help="Minimum annotation count observed across LD-clumps [default = %default]", metavar="double"),
   
-  make_option(c("-B", "--boot"), type="double", default=10, 
-              help="Percent of intervals sampled for bootstrap regressions [default = %default%]", metavar="double"),
+  # make_option(c("-B", "--boot"), type="double", default=10, 
+  #             help="Percent of intervals sampled for bootstrap regressions [default = %default%]", metavar="double"),
   
   ## Run options....
   
-  # make_option(c("-M", "--fleet-prune-ref"), type="logical", default = TRUE, 
-  #             help="Initiate LD-pruning step of 1KG reference data. Only needs to be run once. [default = %default]", metavar="logical"),
+  make_option(c("--Nca"), type="numeric", default = 10000,
+              help="Number of cases in GWAS.  Required for estimation of Vg for SNPs in category [default = %default]", metavar="numeric"),
+  
+  make_option(c("--Nco"), type="numeric", default = 10000,
+              help="Number of controls in GWAS. Required for estimation of Vg for SNPs in category [default = %default]", metavar="numeric"),
+  
+  make_option(c("-M", "--fleet-prune-ref"), type="logical", default = TRUE,
+              help="Initiate LD-pruning step of 1KG reference data. Only needs to be run once. [default = %default]", metavar="logical"),
   
   make_option(c("-A", "--fleet-annotate"), type="logical", default=TRUE, 
               help="Annotate LD-clumps with bedtools [default = %default]", metavar="logical"),
@@ -112,7 +118,7 @@ option_list = list(
               help="Permutation analysis that will sample variants from the MAF bin of target SNPs [default = %default]", metavar="logical"),
   
   make_option("--speed", type="character", default='fast', 
-              help="Change behavior of linear models (fast mode: SET becomes response variable, slow mode: Z-score becomes response variable) [default = %default]", metavar="character"),
+              help="Change behavior of linear models (fast mode; multiple sets added as predictors to regression, slow mode; each set regressed onto Z-scores separately) [default = %default]", metavar="character"),
   
   make_option("--pthres", type="character", default="",
               help="Table with P-value threshold(s) for SNP bins [default P-values < 5e-08, 1e-07, and 1e-06]", metavar="character"),
@@ -844,62 +850,7 @@ fleetTest = function(){
     full_annot = full_annot[match(ld.df$INDEX, full_annot$INDEX), ]
     colnames(full_annot) = gsub(" ", "_", colnames(full_annot)) # replace spaces in ID with underscore
     colnames(full_annot) = gsub("[,]", "", colnames(full_annot)) # replace commas in ID with underscore
-    
-  #  ### == write a flat file containing intervals and all annotations
-  #   if( a > 1){
-  #     refRead = fread(file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.txt",sep=""), h=TRUE);
-  #     refRead = data.table(refRead, full_annot)
-  #     refRead = refRead[,!duplicated(colnames(refRead)),with=F]
-  # 
-  #   fwrite(data.table(refRead),
-  #          file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.txt",sep=""),
-  #          row.names = F, quote = F, nThread  = opt$threads, sep = "\t")} else{ fwrite(data.table(full_annot),
-  #          file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.txt",sep=""),
-  #          row.names = F, quote = F, nThread  = opt$threads, sep = "\t")}
-  # 
-  # }
-
-  # # create PED file
-  # readFlat = fread( paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.txt",sep=""),h=T)
-  # ped = readFlat[,!colnames(readFlat) %in% "INDEX",with=F]
-  # ped = ifelse(ped == 1, "I", "O")
-  # 
-  # colNames = colnames(ped)
-  # 
-  # colnames(ped) = paste("ID",1:ncol(ped),sep="")
-  # orA = seq(from = 1, by = 2, length.out = ncol(ped))
-  # orB = seq(from = 2, by = 2, length.out = ncol(ped))
-  # order = c(orA,orB)
-  # 
-  # # ped2 = matrix(0, nrow = nrow(ped), ncol = ncol(ped))
-  # ped2 = data.table(ped)
-  # colnames(ped2) = paste("ID_B",1:ncol(ped2),sep="")
-  # 
-  # names(order) = c(colnames(ped), colnames(ped2))
-  # order = order[order(order,decreasing=F)]
-  # 
-  # slap = data.table(ped2,ped)
-  # setcolorder(slap, names(order))
-  # 
-  # # Write MAP file
-  # map = data.frame(CHR = 1, ID = colnames(readFlat)[-1], POS = 0, BP = 1:(ncol(readFlat)-1))
-  # fwrite(map,  file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.map",sep=""), quote = F, row.names = F, sep=  "\t", col.names=F)
-  # # create FAM file
-  # fam = data.frame(FID = 1:nrow(readFlat), IID = readFlat$INDEX, PAT = 0, MAT = 0, SEX = 0, PHEN = 0)
-  # ped = data.table(fam, slap)
-  # # write ped file
-  # fwrite(ped,  file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.ped",sep=""), quote = F, row.names = F, sep=  " ", col.names=F)
-  # # Write PHEN file
-  # phen = data.frame(FID = 1:nrow(readFlat), IID = readFlat$INDEX, PHEN = ld.df$ZSCORE, NGENES = ld.df$NGENES, LOCSIZE = ld.df$LOCSIZE, NSNP = ld.df$N, MAF = ld.df$MAF)
-  # fwrite(phen,  file = paste(srcPath,"/out/",opt$out,"_IntervalAnnotations.phen",sep=""), quote = F, row.names = F, sep=  "\t", col.names=T)
-
-
-# }
-
-
-    
-    # full_annot[,-1] = apply(full_annot[,-1], 2, function(x) my.invnorm(x))
-    
+   
     # === merge data table with ld.df stats
     
     grab = ld.df
@@ -1049,10 +1000,10 @@ fleetTest = function(){
                                      d=length(zall)/5,
                                      repl=5, 
                                      out="unconditional",
-                                     caseNo=35476, 
-                                     ctrlNo=46839, 
+                                     caseNo=opt$Nca, 
+                                     ctrlNo=opt$Nco, 
                                      K=0.01))
-        if(VgInAnnot != "error"){
+        if(class(VgInAnnot) != "try-error"){
           VgCalc = data.frame(t(unlist(VgInAnnot)))
           VgCalc$VgZ = VgCalc[,1]/VgCalc[,2]
           VgCalc$VgP = pnorm(-abs(VgCalc$VgZ))
